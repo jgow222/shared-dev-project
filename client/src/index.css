@@ -1,0 +1,311 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* NURILO LIGHT MODE — Health/Teal Theme */
+:root {
+  --button-outline: rgba(0,0,0, .10);
+  --badge-outline: rgba(0,0,0, .05);
+  --opaque-button-border-intensity: -8;
+  --elevate-1: rgba(0,0,0, .03);
+  --elevate-2: rgba(0,0,0, .08);
+
+  /* Warm off-white background #F8F7F4 */
+  --background: 45 24% 96%;
+  /* Deep charcoal text #1C2B26 */
+  --foreground: 156 23% 14%;
+  /* Border #E8E5DF */
+  --border: 40 12% 89%;
+  /* Surface white #FFFFFF */
+  --card: 0 0% 100%;
+  --card-foreground: 156 23% 14%;
+  --card-border: 40 12% 89%;
+
+  --sidebar: 45 24% 96%;
+  --sidebar-foreground: 156 23% 14%;
+  --sidebar-border: 40 12% 89%;
+  --sidebar-primary: 163 61% 26%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 163 42% 93%;
+  --sidebar-accent-foreground: 156 23% 14%;
+  --sidebar-ring: 163 61% 26%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 156 23% 14%;
+  --popover-border: 40 12% 89%;
+
+  /* Primary teal #1A6B5A */
+  --primary: 163 61% 26%;
+  --primary-foreground: 0 0% 100%;
+
+  /* Light teal #E8F5F1 */
+  --secondary: 163 42% 93%;
+  --secondary-foreground: 163 61% 26%;
+
+  /* Muted sage area */
+  --muted: 45 12% 93%;
+  /* Warm gray #888780 */
+  --muted-foreground: 50 3% 52%;
+
+  /* Light teal accent */
+  --accent: 163 42% 93%;
+  --accent-foreground: 163 61% 26%;
+
+  /* Alert red #D94F3D */
+  --destructive: 7 67% 55%;
+  --destructive-foreground: 0 0% 100%;
+
+  --input: 40 12% 89%;
+  --ring: 163 61% 26%;
+
+  --chart-1: 163 61% 26%;
+  --chart-2: 149 50% 35%;
+  --chart-3: 36 90% 43%;
+  --chart-4: 7 67% 55%;
+  --chart-5: 156 25% 38%;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-serif: Georgia, serif;
+  --font-mono: Menlo, monospace;
+  --radius: .5rem;
+
+  /* Nurilo custom tokens */
+  --nurilo-primary: 163 61% 26%;
+  --nurilo-sage: 156 25% 38%;
+  --nurilo-warm-gray: 50 3% 52%;
+  --nurilo-alert-amber: 36 90% 43%;
+  --nurilo-success: 149 50% 35%;
+  --nurilo-light-teal: 163 42% 93%;
+
+  --shadow-2xs: 0px 1px 2px 0px hsl(0 0% 0% / 0.04);
+  --shadow-xs: 0px 1px 3px 0px hsl(0 0% 0% / 0.06);
+  --shadow-sm: 0px 2px 4px 0px hsl(0 0% 0% / 0.06), 0px 1px 2px -1px hsl(0 0% 0% / 0.04);
+  --shadow: 0px 4px 6px -1px hsl(0 0% 0% / 0.06), 0px 2px 4px -2px hsl(0 0% 0% / 0.04);
+  --shadow-md: 0px 6px 10px -1px hsl(0 0% 0% / 0.06), 0px 4px 6px -2px hsl(0 0% 0% / 0.04);
+  --shadow-lg: 0px 10px 15px -3px hsl(0 0% 0% / 0.06), 0px 4px 6px -4px hsl(0 0% 0% / 0.04);
+  --shadow-xl: 0px 20px 25px -5px hsl(0 0% 0% / 0.08), 0px 8px 10px -6px hsl(0 0% 0% / 0.04);
+  --shadow-2xl: 0px 25px 50px -12px hsl(0 0% 0% / 0.15);
+  --tracking-normal: 0em;
+  --spacing: 0.25rem;
+
+  /* Fallback for older browsers */
+  --sidebar-primary-border: hsl(var(--sidebar-primary));
+  --sidebar-primary-border: hsl(from hsl(var(--sidebar-primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --sidebar-accent-border: hsl(var(--sidebar-accent));
+  --sidebar-accent-border: hsl(from hsl(var(--sidebar-accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --primary-border: hsl(var(--primary));
+  --primary-border: hsl(from hsl(var(--primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --secondary-border: hsl(var(--secondary));
+  --secondary-border: hsl(from hsl(var(--secondary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --muted-border: hsl(var(--muted));
+  --muted-border: hsl(from hsl(var(--muted)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --accent-border: hsl(var(--accent));
+  --accent-border: hsl(from hsl(var(--accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --destructive-border: hsl(var(--destructive));
+  --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+}
+
+/* NURILO DARK MODE */
+.dark {
+  --button-outline: rgba(255,255,255, .10);
+  --badge-outline: rgba(255,255,255, .05);
+  --opaque-button-border-intensity: 9;
+  --elevate-1: rgba(255,255,255, .04);
+  --elevate-2: rgba(255,255,255, .09);
+
+  /* Background #1C2B26 */
+  --background: 156 23% 14%;
+  /* Text #E8F5F1 */
+  --foreground: 163 42% 93%;
+  /* Border #3A524A */
+  --border: 156 17% 27%;
+  /* Surface #243530 */
+  --card: 156 18% 17%;
+  --card-foreground: 163 42% 93%;
+  --card-border: 156 17% 27%;
+
+  --sidebar: 156 18% 17%;
+  --sidebar-foreground: 163 42% 93%;
+  --sidebar-border: 156 17% 27%;
+  --sidebar-primary: 157 55% 39%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 156 18% 22%;
+  --sidebar-accent-foreground: 163 42% 93%;
+  --sidebar-ring: 157 55% 39%;
+
+  --popover: 156 18% 17%;
+  --popover-foreground: 163 42% 93%;
+  --popover-border: 156 17% 27%;
+
+  /* Primary teal (dark) #2D9B7A */
+  --primary: 157 55% 39%;
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 156 18% 22%;
+  --secondary-foreground: 163 42% 93%;
+
+  --muted: 156 15% 20%;
+  --muted-foreground: 156 15% 60%;
+
+  --accent: 156 18% 22%;
+  --accent-foreground: 163 42% 93%;
+
+  --destructive: 7 67% 55%;
+  --destructive-foreground: 0 0% 100%;
+
+  --input: 156 17% 27%;
+  --ring: 157 55% 39%;
+
+  --chart-1: 157 55% 45%;
+  --chart-2: 149 50% 45%;
+  --chart-3: 36 90% 55%;
+  --chart-4: 7 67% 60%;
+  --chart-5: 156 25% 50%;
+
+  --nurilo-primary: 157 55% 39%;
+  --nurilo-sage: 156 25% 50%;
+  --nurilo-warm-gray: 156 10% 55%;
+  --nurilo-alert-amber: 36 90% 50%;
+  --nurilo-success: 149 50% 45%;
+  --nurilo-light-teal: 156 18% 22%;
+
+  --shadow-2xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.00);
+  --shadow-xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.00);
+  --shadow-sm: 0px 2px 0px 0px hsl(0 0% 0% / 0.00), 0px 1px 2px -1px hsl(0 0% 0% / 0.00);
+  --shadow: 0px 2px 0px 0px hsl(0 0% 0% / 0.00), 0px 1px 2px -1px hsl(0 0% 0% / 0.00);
+  --shadow-md: 0px 2px 0px 0px hsl(0 0% 0% / 0.00), 0px 2px 4px -1px hsl(0 0% 0% / 0.00);
+  --shadow-lg: 0px 2px 0px 0px hsl(0 0% 0% / 0.00), 0px 4px 6px -1px hsl(0 0% 0% / 0.00);
+  --shadow-xl: 0px 2px 0px 0px hsl(0 0% 0% / 0.00), 0px 8px 10px -1px hsl(0 0% 0% / 0.00);
+  --shadow-2xl: 0px 2px 0px 0px hsl(0 0% 0% / 0.00);
+
+  --sidebar-primary-border: hsl(var(--sidebar-primary));
+  --sidebar-primary-border: hsl(from hsl(var(--sidebar-primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --sidebar-accent-border: hsl(var(--sidebar-accent));
+  --sidebar-accent-border: hsl(from hsl(var(--sidebar-accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --primary-border: hsl(var(--primary));
+  --primary-border: hsl(from hsl(var(--primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --secondary-border: hsl(var(--secondary));
+  --secondary-border: hsl(from hsl(var(--secondary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --muted-border: hsl(var(--muted));
+  --muted-border: hsl(from hsl(var(--muted)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --accent-border: hsl(var(--accent));
+  --accent-border: hsl(from hsl(var(--accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --destructive-border: hsl(var(--destructive));
+  --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+  }
+}
+
+/* Pulse animation for overdue doses */
+@keyframes amber-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 hsl(36 90% 43% / 0.4); }
+  50% { box-shadow: 0 0 0 8px hsl(36 90% 43% / 0); }
+}
+
+@keyframes red-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 hsl(7 67% 55% / 0.4); }
+  50% { box-shadow: 0 0 0 8px hsl(7 67% 55% / 0); }
+}
+
+.animate-amber-pulse {
+  animation: amber-pulse 2s ease-in-out infinite;
+}
+
+.animate-red-pulse {
+  animation: red-pulse 1.5s ease-in-out infinite;
+}
+
+/* Draw checkmark animation */
+@keyframes draw-check {
+  0% { stroke-dashoffset: 24; }
+  100% { stroke-dashoffset: 0; }
+}
+
+.animate-draw-check {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: draw-check 0.5s ease-out forwards;
+}
+
+/* Bottom safe area for mobile */
+.pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 16px);
+}
+
+@layer utilities {
+  input[type="search"]::-webkit-search-cancel-button {
+    @apply hidden;
+  }
+
+  [contenteditable][data-placeholder]:empty::before {
+    content: attr(data-placeholder);
+    color: hsl(var(--muted-foreground));
+    pointer-events: none;
+  }
+
+  .no-default-hover-elevate {}
+  .no-default-active-elevate {}
+
+  .toggle-elevate::before,
+  .toggle-elevate-2::before {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: 0px;
+    border-radius: inherit;
+    z-index: -1;
+  }
+
+  .toggle-elevate.toggle-elevated::before {
+    background-color: var(--elevate-2);
+  }
+
+  .border.toggle-elevate::before {
+    inset: -1px;
+  }
+
+  .hover-elevate:not(.no-default-hover-elevate),
+  .active-elevate:not(.no-default-active-elevate),
+  .hover-elevate-2:not(.no-default-hover-elevate),
+  .active-elevate-2:not(.no-default-active-elevate) {
+    position: relative;
+    z-index: 0;
+  }
+
+  .hover-elevate:not(.no-default-hover-elevate)::after,
+  .active-elevate:not(.no-default-active-elevate)::after,
+  .hover-elevate-2:not(.no-default-hover-elevate)::after,
+  .active-elevate-2:not(.no-default-active-elevate)::after {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: 0px;
+    border-radius: inherit;
+    z-index: 999;
+  }
+
+  .hover-elevate:hover:not(.no-default-hover-elevate)::after,
+  .active-elevate:active:not(.no-default-active-elevate)::after {
+    background-color: var(--elevate-1);
+  }
+
+  .hover-elevate-2:hover:not(.no-default-hover-elevate)::after,
+  .active-elevate-2:active:not(.no-default-active-elevate)::after {
+    background-color: var(--elevate-2);
+  }
+
+  .border.hover-elevate:not(.no-hover-interaction-elevate)::after,
+  .border.active-elevate:not(.no-active-interaction-elevate)::after,
+  .border.hover-elevate-2:not(.no-hover-interaction-elevate)::after,
+  .border.active-elevate-2:not(.no-active-interaction-elevate)::after {
+    inset: -1px;
+  }
+}
