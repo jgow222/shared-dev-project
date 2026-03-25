@@ -65,9 +65,9 @@ function FamilyCard({ member, onClick }: { member: FamilyMember; onClick: () => 
         <div className="flex-1 min-w-0">
           <h3 className="font-semibold text-sm" data-testid={`family-name-${member.id}`}>{member.name}</h3>
           <p className="text-xs text-muted-foreground">{member.relationship}</p>
-          {member.uiMode !== "standard" && (
+          {member.ui_mode !== "standard" && (
             <span className="text-[10px] font-medium bg-secondary text-secondary-foreground px-2 py-0.5 rounded-xl mt-1 inline-block">
-              {member.uiMode === "elder" ? "Elder Mode" : "Child Mode"}
+              {member.ui_mode === "elder" ? "Elder Mode" : "Child Mode"}
             </span>
           )}
         </div>
@@ -268,7 +268,7 @@ function MemberDetail({ member, onClose }: { member: FamilyMember; onClose: () =
                 </div>
                 <div>
                   <p className="text-sm font-semibold">{med.name}</p>
-                  <p className="text-xs text-muted-foreground">{med.doseStrength} {med.doseUnit} {med.form}</p>
+                  <p className="text-xs text-muted-foreground">{med.dose_strength} {med.dose_unit} {med.form}</p>
                 </div>
               </div>
             ))}
@@ -282,13 +282,13 @@ function MemberDetail({ member, onClose }: { member: FamilyMember; onClose: () =
         <div className="flex items-center justify-between">
           <p className="text-sm">Caregiver alerts</p>
           <span className={`text-xs font-medium px-2 py-0.5 rounded-xl ${
-            member.alertEnabled ? "bg-[hsl(var(--nurilo-success))]/10 text-[hsl(var(--nurilo-success))]" : "bg-muted text-muted-foreground"
+            member.alert_enabled ? "bg-[hsl(var(--nurilo-success))]/10 text-[hsl(var(--nurilo-success))]" : "bg-muted text-muted-foreground"
           }`}>
-            {member.alertEnabled ? "On" : "Off"}
+            {member.alert_enabled ? "On" : "Off"}
           </span>
         </div>
         <p className="text-xs text-muted-foreground mt-1">
-          Alert after {member.alertDelay} min of missed dose
+          Alert after {member.alert_delay} min of missed dose
         </p>
       </section>
     </motion.div>
@@ -308,9 +308,9 @@ function AddMemberWizard({ onClose }: { onClose: () => void }) {
       await apiRequest("POST", "/api/family", {
         name,
         relationship,
-        uiMode,
-        alertEnabled: 1,
-        alertDelay,
+        ui_mode: uiMode,
+        alert_enabled: 1,
+        alert_delay: alertDelay,
         status: "gray",
       });
     },

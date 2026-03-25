@@ -166,7 +166,7 @@ export default function ClarityPage() {
   // Count questions sent today
   const today = new Date().toISOString().split("T")[0];
   const questionsToday = messages.filter(
-    m => m.role === "user" && m.createdAt.startsWith(today)
+    m => m.role === "user" && m.created_at.startsWith(today)
   ).length;
   const freeLimit = 1;
   const isLimitReached = questionsToday >= freeLimit;

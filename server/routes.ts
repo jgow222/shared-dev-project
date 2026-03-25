@@ -58,7 +58,6 @@ function getClarityResponse(userMessage: string, medNames: string[]): string {
     return clarityResponses["food"](medNames);
   }
 
-  // Generic helpful response
   return `That's a great question. Based on your current medications (${medNames.join(", ")}), here's what I'd recommend:\n\nThis is something worth discussing with your doctor or pharmacist, as they can give you advice tailored to your specific health situation.\n\nIn the meantime, here are some general guidelines:\n• Always take your medications as prescribed\n• Keep track of any new symptoms\n• Don't make changes without consulting your healthcare provider\n\nWould you like to know more about any of your specific medications?`;
 }
 
@@ -67,249 +66,354 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
 
-  // Seed database on first run
-  await storage.seed();
-
   // === Profile ===
   app.get("/api/profile", async (_req, res) => {
-    const profile = await storage.getProfile();
-    res.json(profile || null);
+    try {
+      const profile = await storage.getProfile();
+      res.json(profile || null);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.post("/api/profile", async (req, res) => {
-    const profile = await storage.createProfile(req.body);
-    res.json(profile);
+    try {
+      const profile = await storage.createProfile(req.body);
+      res.json(profile);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.patch("/api/profile/:id", async (req, res) => {
-    const id = parseInt(req.params.id);
-    const profile = await storage.updateProfile(id, req.body);
-    res.json(profile);
+    try {
+      const id = parseInt(req.params.id);
+      const profile = await storage.updateProfile(id, req.body);
+      res.json(profile);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // === Medications ===
   app.get("/api/medications", async (_req, res) => {
-    const meds = await storage.getMedications();
-    res.json(meds);
+    try {
+      const meds = await storage.getMedications();
+      res.json(meds);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.get("/api/medications/:id", async (req, res) => {
-    const med = await storage.getMedication(parseInt(req.params.id));
-    if (!med) return res.status(404).json({ error: "Not found" });
-    res.json(med);
+    try {
+      const med = await storage.getMedication(parseInt(req.params.id));
+      if (!med) return res.status(404).json({ error: "Not found" });
+      res.json(med);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.post("/api/medications", async (req, res) => {
-    const med = await storage.createMedication(req.body);
-    // Generate today's dose logs for the new medication
-    const today = new Date().toISOString().split("T")[0];
-    const times: string[] = JSON.parse(med.scheduleTimes);
-    for (const time of times) {
-      await storage.createDoseLog({
-        medicationId: med.id,
-        userId: med.userId,
-        scheduledTime: time,
-        scheduledDate: today,
-        status: "pending",
-      });
+    try {
+      const med = await storage.createMedication(req.body);
+      // Generate today's dose logs for the new medication
+      const today = new Date().toISOString().split("T")[0];
+      const times: string[] = JSON.parse(med.schedule_times);
+      for (const time of times) {
+        await storage.createDoseLog({
+          medication_id: med.id,
+          user_id: med.user_id,
+          scheduled_time: time,
+          scheduled_date: today,
+          status: "pending",
+          confirmed_at: null,
+          confirmed_by: null,
+        });
+      }
+      res.json(med);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
     }
-    res.json(med);
   });
 
   app.patch("/api/medications/:id", async (req, res) => {
-    const id = parseInt(req.params.id);
-    const med = await storage.updateMedication(id, req.body);
-    res.json(med);
+    try {
+      const id = parseInt(req.params.id);
+      const med = await storage.updateMedication(id, req.body);
+      res.json(med);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.delete("/api/medications/:id", async (req, res) => {
-    await storage.deleteMedication(parseInt(req.params.id));
-    res.json({ ok: true });
+    try {
+      await storage.deleteMedication(parseInt(req.params.id));
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // === Dose Logs ===
   app.get("/api/doses/:date", async (req, res) => {
-    const logs = await storage.getDoseLogs(req.params.date);
-    res.json(logs);
+    try {
+      const logs = await storage.getDoseLogs(req.params.date);
+      res.json(logs);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.get("/api/doses/medication/:id", async (req, res) => {
-    const logs = await storage.getDoseLogsForMed(parseInt(req.params.id));
-    res.json(logs);
+    try {
+      const logs = await storage.getDoseLogsForMed(parseInt(req.params.id));
+      res.json(logs);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.post("/api/doses", async (req, res) => {
-    const log = await storage.createDoseLog(req.body);
-    res.json(log);
+    try {
+      const log = await storage.createDoseLog(req.body);
+      res.json(log);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.patch("/api/doses/:id", async (req, res) => {
-    const id = parseInt(req.params.id);
-    const log = await storage.updateDoseLog(id, req.body);
-    res.json(log);
+    try {
+      const id = parseInt(req.params.id);
+      const log = await storage.updateDoseLog(id, req.body);
+      res.json(log);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // === Chat / Clarity ===
   app.get("/api/chat", async (_req, res) => {
-    const messages = await storage.getChatMessages();
-    res.json(messages);
+    try {
+      const messages = await storage.getChatMessages();
+      res.json(messages);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.post("/api/chat", async (req, res) => {
-    const { content } = req.body;
-    const now = new Date().toISOString();
+    try {
+      const { content } = req.body;
+      const now = new Date().toISOString();
 
-    // Save user message
-    const userMsg = await storage.createChatMessage({
-      userId: 1,
-      role: "user",
-      content,
-      createdAt: now,
-    });
+      const userMsg = await storage.createChatMessage({
+        user_id: 1,
+        role: "user",
+        content,
+        feedback: null,
+        created_at: now,
+      });
 
-    // Get user's medications for context
-    const meds = await storage.getMedications();
-    const medNames = meds.filter(m => m.status === "active").map(m => m.name);
+      const meds = await storage.getMedications();
+      const medNames = meds.filter(m => m.status === "active").map(m => m.name);
 
-    // Generate response
-    const responseText = getClarityResponse(content, medNames);
-    const disclaimer = "\n\n---\n*This is general health information. Always check with your doctor for decisions specific to your situation.*";
+      const responseText = getClarityResponse(content, medNames);
+      const disclaimer = "\n\n---\n*This is general health information. Always check with your doctor for decisions specific to your situation.*";
 
-    const assistantMsg = await storage.createChatMessage({
-      userId: 1,
-      role: "assistant",
-      content: responseText + disclaimer,
-      createdAt: new Date().toISOString(),
-    });
+      const assistantMsg = await storage.createChatMessage({
+        user_id: 1,
+        role: "assistant",
+        content: responseText + disclaimer,
+        feedback: null,
+        created_at: new Date().toISOString(),
+      });
 
-    res.json({ userMsg, assistantMsg });
+      res.json({ userMsg, assistantMsg });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.patch("/api/chat/:id/feedback", async (req, res) => {
-    const id = parseInt(req.params.id);
-    await storage.updateChatFeedback(id, req.body.feedback);
-    res.json({ ok: true });
+    try {
+      const id = parseInt(req.params.id);
+      await storage.updateChatFeedback(id, req.body.feedback);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.delete("/api/chat", async (_req, res) => {
-    await storage.clearChat();
-    res.json({ ok: true });
+    try {
+      await storage.clearChat();
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // === Family ===
   app.get("/api/family", async (_req, res) => {
-    const members = await storage.getFamilyMembers();
-    res.json(members);
+    try {
+      const members = await storage.getFamilyMembers();
+      res.json(members);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.get("/api/family/:id", async (req, res) => {
-    const member = await storage.getFamilyMember(parseInt(req.params.id));
-    if (!member) return res.status(404).json({ error: "Not found" });
-    res.json(member);
+    try {
+      const member = await storage.getFamilyMember(parseInt(req.params.id));
+      if (!member) return res.status(404).json({ error: "Not found" });
+      res.json(member);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.post("/api/family", async (req, res) => {
-    const member = await storage.createFamilyMember(req.body);
-    res.json(member);
+    try {
+      const member = await storage.createFamilyMember(req.body);
+      res.json(member);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.patch("/api/family/:id", async (req, res) => {
-    const id = parseInt(req.params.id);
-    const member = await storage.updateFamilyMember(id, req.body);
-    res.json(member);
+    try {
+      const id = parseInt(req.params.id);
+      const member = await storage.updateFamilyMember(id, req.body);
+      res.json(member);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.delete("/api/family/:id", async (req, res) => {
-    await storage.deleteFamilyMember(parseInt(req.params.id));
-    res.json({ ok: true });
+    try {
+      await storage.deleteFamilyMember(parseInt(req.params.id));
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // Family medications
   app.get("/api/family/:id/medications", async (req, res) => {
-    const meds = await storage.getFamilyMedications(parseInt(req.params.id));
-    res.json(meds);
+    try {
+      const meds = await storage.getFamilyMedications(parseInt(req.params.id));
+      res.json(meds);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.post("/api/family/:id/medications", async (req, res) => {
-    const med = await storage.createFamilyMedication({
-      ...req.body,
-      familyMemberId: parseInt(req.params.id),
-    });
-    res.json(med);
+    try {
+      const med = await storage.createFamilyMedication({
+        ...req.body,
+        family_member_id: parseInt(req.params.id),
+      });
+      res.json(med);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // Nudges
   app.get("/api/family/:id/nudges", async (req, res) => {
-    const n = await storage.getNudges(parseInt(req.params.id));
-    res.json(n);
+    try {
+      const n = await storage.getNudges(parseInt(req.params.id));
+      res.json(n);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   app.post("/api/family/:id/nudges", async (req, res) => {
-    const nudge = await storage.createNudge({
-      ...req.body,
-      familyMemberId: parseInt(req.params.id),
-      sentAt: new Date().toISOString(),
-    });
-    res.json(nudge);
+    try {
+      const nudge = await storage.createNudge({
+        ...req.body,
+        family_member_id: parseInt(req.params.id),
+        sent_at: new Date().toISOString(),
+      });
+      res.json(nudge);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // === Health Tips ===
   app.get("/api/tips", async (_req, res) => {
-    const tips = await storage.getHealthTips();
-    res.json(tips);
+    try {
+      const tips = await storage.getHealthTips();
+      res.json(tips);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // === Drug Interactions (simulated) ===
   app.post("/api/interactions/check", async (req, res) => {
-    const { medicationName } = req.body;
-    const meds = await storage.getMedications();
-    const activeMeds = meds.filter(m => m.status === "active");
-    const lower = medicationName.toLowerCase();
-    const interactions: Array<{ severity: string; message: string; medication: string }> = [];
+    try {
+      const { medicationName } = req.body;
+      const meds = await storage.getMedications();
+      const activeMeds = meds.filter(m => m.status === "active");
+      const lower = medicationName.toLowerCase();
+      const interactions: Array<{ severity: string; message: string; medication: string }> = [];
 
-    // Check common interactions
-    const hasWarfarin = activeMeds.some(m => m.name.toLowerCase().includes("warfarin"));
-    const hasLisinopril = activeMeds.some(m => m.name.toLowerCase().includes("lisinopril"));
-    const hasMetformin = activeMeds.some(m => m.name.toLowerCase().includes("metformin"));
-    const hasStatin = activeMeds.some(m => 
-      m.name.toLowerCase().includes("atorvastatin") || 
-      m.name.toLowerCase().includes("simvastatin") ||
-      m.name.toLowerCase().includes("rosuvastatin")
-    );
+      const hasWarfarin = activeMeds.some(m => m.name.toLowerCase().includes("warfarin"));
+      const hasLisinopril = activeMeds.some(m => m.name.toLowerCase().includes("lisinopril"));
+      const hasMetformin = activeMeds.some(m => m.name.toLowerCase().includes("metformin"));
+      const hasStatin = activeMeds.some(m =>
+        m.name.toLowerCase().includes("atorvastatin") ||
+        m.name.toLowerCase().includes("simvastatin") ||
+        m.name.toLowerCase().includes("rosuvastatin")
+      );
 
-    if ((lower.includes("ibuprofen") || lower.includes("aspirin") || lower.includes("naproxen")) && hasWarfarin) {
-      interactions.push({
-        severity: "severe",
-        message: "NSAIDs significantly increase bleeding risk with Warfarin. This combination should generally be avoided.",
-        medication: "Warfarin",
-      });
+      if ((lower.includes("ibuprofen") || lower.includes("aspirin") || lower.includes("naproxen")) && hasWarfarin) {
+        interactions.push({
+          severity: "severe",
+          message: "NSAIDs significantly increase bleeding risk with Warfarin. This combination should generally be avoided.",
+          medication: "Warfarin",
+        });
+      }
+
+      if ((lower.includes("ibuprofen") || lower.includes("naproxen")) && hasLisinopril) {
+        interactions.push({
+          severity: "moderate",
+          message: "NSAIDs can reduce the blood pressure-lowering effect of Lisinopril and may affect kidney function.",
+          medication: "Lisinopril",
+        });
+      }
+
+      if (lower.includes("alcohol") && hasMetformin) {
+        interactions.push({
+          severity: "moderate",
+          message: "Alcohol with Metformin increases the risk of lactic acidosis, a rare but serious condition.",
+          medication: "Metformin",
+        });
+      }
+
+      if (lower.includes("grapefruit") && hasStatin) {
+        interactions.push({
+          severity: "moderate",
+          message: "Grapefruit can increase statin levels in your blood, raising the risk of side effects like muscle pain.",
+          medication: activeMeds.find(m => m.name.toLowerCase().includes("statin"))?.name || "Statin",
+        });
+      }
+
+      res.json({ interactions });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
     }
-
-    if ((lower.includes("ibuprofen") || lower.includes("naproxen")) && hasLisinopril) {
-      interactions.push({
-        severity: "moderate",
-        message: "NSAIDs can reduce the blood pressure-lowering effect of Lisinopril and may affect kidney function.",
-        medication: "Lisinopril",
-      });
-    }
-
-    if (lower.includes("alcohol") && hasMetformin) {
-      interactions.push({
-        severity: "moderate",
-        message: "Alcohol with Metformin increases the risk of lactic acidosis, a rare but serious condition.",
-        medication: "Metformin",
-      });
-    }
-
-    if (lower.includes("grapefruit") && hasStatin) {
-      interactions.push({
-        severity: "moderate",
-        message: "Grapefruit can increase statin levels in your blood, raising the risk of side effects like muscle pain.",
-        medication: activeMeds.find(m => m.name.toLowerCase().includes("statin"))?.name || "Statin",
-      });
-    }
-
-    res.json({ interactions });
   });
 
   return httpServer;

@@ -45,7 +45,7 @@ interface DoseRowProps {
 
 function DoseRow({ dose, medication, onConfirm, onSkip }: DoseRowProps) {
   const status = dose.status;
-  const timeStatus = status === "pending" ? getTimeStatus(dose.scheduledTime) : null;
+  const timeStatus = status === "pending" ? getTimeStatus(dose.scheduled_time) : null;
 
   const getButtonStyle = () => {
     if (status === "taken") return "bg-[hsl(var(--nurilo-success))] text-white";
@@ -68,11 +68,11 @@ function DoseRow({ dose, medication, onConfirm, onSkip }: DoseRowProps) {
           {medication?.name || "Unknown"}
         </p>
         <p className="text-xs text-muted-foreground">
-          {medication?.doseStrength} {medication?.doseUnit} · {formatTime(dose.scheduledTime)}
+          {medication?.dose_strength} {medication?.dose_unit} · {formatTime(dose.scheduled_time)}
         </p>
-        {status === "taken" && dose.confirmedAt && (
+        {status === "taken" && dose.confirmed_at && (
           <p className="text-[11px] text-[hsl(var(--nurilo-success))] mt-0.5">
-            Taken at {new Date(dose.confirmedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+            Taken at {new Date(dose.confirmed_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
           </p>
         )}
         {status === "skipped" && (
@@ -196,7 +196,7 @@ export default function HomePage() {
     mutationFn: async (id: number) => {
       await apiRequest("PATCH", `/api/doses/${id}`, {
         status: "taken",
-        confirmedAt: new Date().toISOString(),
+        confirmed_at: new Date().toISOString(),
       });
     },
     onSuccess: () => {
@@ -223,7 +223,7 @@ export default function HomePage() {
       if (profile) {
         await apiRequest("PATCH", `/api/profile/${profile.id}`, { name });
       } else {
-        await apiRequest("POST", "/api/profile", { name, streakDays: 0, darkMode: 0 });
+        await apiRequest("POST", "/api/profile", { name, streak_days: 0, dark_mode: 0 });
       }
     },
     onSuccess: () => {
@@ -234,13 +234,13 @@ export default function HomePage() {
 
   const takenCount = doseLogs.filter(d => d.status === "taken").length;
   const totalCount = doseLogs.length;
-  const streak = profile?.streakDays || 0;
+  const streak = profile?.streak_days || 0;
 
   // Day of year for tip rotation
   const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000);
   const todayTip = tips.length > 0 ? tips[dayOfYear % tips.length] : null;
 
-  const getMedForDose = (dose: DoseLog) => medications.find(m => m.id === dose.medicationId);
+  const getMedForDose = (dose: DoseLog) => medications.find(m => m.id === dose.medication_id);
 
   // Sort doses: pending first (by time), then taken, then skipped
   const sortedDoses = [...doseLogs].sort((a, b) => {
@@ -248,7 +248,7 @@ export default function HomePage() {
     const oa = order[a.status as keyof typeof order] ?? 1;
     const ob = order[b.status as keyof typeof order] ?? 1;
     if (oa !== ob) return oa - ob;
-    return a.scheduledTime.localeCompare(b.scheduledTime);
+    return a.scheduled_time.localeCompare(b.scheduled_time);
   });
 
   return (

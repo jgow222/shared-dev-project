@@ -1,368 +1,216 @@
-import {
-  type UserProfile, type InsertUserProfile, userProfile,
-  type Medication, type InsertMedication, medications,
-  type DoseLog, type InsertDoseLog, doseLogs,
-  type ChatMessage, type InsertChatMessage, chatMessages,
-  type FamilyMember, type InsertFamilyMember, familyMembers,
-  type FamilyMedication, type InsertFamilyMedication, familyMedications,
-  type Nudge, type InsertNudge, nudges,
-  type HealthTip, healthTips,
+import { supabase } from "./supabase";
+import type {
+  UserProfile, InsertUserProfile,
+  Medication, InsertMedication,
+  DoseLog, InsertDoseLog,
+  ChatMessage, InsertChatMessage,
+  FamilyMember, InsertFamilyMember,
+  FamilyMedication, InsertFamilyMedication,
+  Nudge, InsertNudge,
+  HealthTip,
 } from "@shared/schema";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
-import { eq, and, desc } from "drizzle-orm";
-
-const sqlite = new Database("data.db");
-sqlite.pragma("journal_mode = WAL");
-
-export const db = drizzle(sqlite);
 
 export interface IStorage {
-  // User profile
-  getProfile(): Promise<UserProfile | undefined>;
+  getProfile(): Promise<UserProfile | null>;
   createProfile(profile: InsertUserProfile): Promise<UserProfile>;
-  updateProfile(id: number, data: Partial<InsertUserProfile>): Promise<UserProfile | undefined>;
+  updateProfile(id: number, data: Partial<InsertUserProfile>): Promise<UserProfile | null>;
 
-  // Medications
   getMedications(userId?: number): Promise<Medication[]>;
-  getMedication(id: number): Promise<Medication | undefined>;
+  getMedication(id: number): Promise<Medication | null>;
   createMedication(med: InsertMedication): Promise<Medication>;
-  updateMedication(id: number, data: Partial<InsertMedication>): Promise<Medication | undefined>;
+  updateMedication(id: number, data: Partial<InsertMedication>): Promise<Medication | null>;
   deleteMedication(id: number): Promise<void>;
 
-  // Dose logs
   getDoseLogs(date: string, userId?: number): Promise<DoseLog[]>;
   getDoseLogsForMed(medicationId: number, limit?: number): Promise<DoseLog[]>;
   createDoseLog(log: InsertDoseLog): Promise<DoseLog>;
-  updateDoseLog(id: number, data: Partial<InsertDoseLog>): Promise<DoseLog | undefined>;
+  updateDoseLog(id: number, data: Partial<InsertDoseLog>): Promise<DoseLog | null>;
 
-  // Chat
   getChatMessages(userId?: number): Promise<ChatMessage[]>;
   createChatMessage(msg: InsertChatMessage): Promise<ChatMessage>;
   updateChatFeedback(id: number, feedback: string): Promise<void>;
   clearChat(userId?: number): Promise<void>;
 
-  // Family
   getFamilyMembers(): Promise<FamilyMember[]>;
-  getFamilyMember(id: number): Promise<FamilyMember | undefined>;
+  getFamilyMember(id: number): Promise<FamilyMember | null>;
   createFamilyMember(member: InsertFamilyMember): Promise<FamilyMember>;
-  updateFamilyMember(id: number, data: Partial<InsertFamilyMember>): Promise<FamilyMember | undefined>;
+  updateFamilyMember(id: number, data: Partial<InsertFamilyMember>): Promise<FamilyMember | null>;
   deleteFamilyMember(id: number): Promise<void>;
 
-  // Family medications
   getFamilyMedications(familyMemberId: number): Promise<FamilyMedication[]>;
   createFamilyMedication(med: InsertFamilyMedication): Promise<FamilyMedication>;
 
-  // Nudges
   getNudges(familyMemberId: number): Promise<Nudge[]>;
   createNudge(nudge: InsertNudge): Promise<Nudge>;
 
-  // Health tips
   getHealthTips(): Promise<HealthTip[]>;
-
-  // Seed
-  seed(): Promise<void>;
 }
 
-export class DatabaseStorage implements IStorage {
-  async getProfile(): Promise<UserProfile | undefined> {
-    return db.select().from(userProfile).get();
+export class SupabaseStorage implements IStorage {
+  // === Profile ===
+  async getProfile(): Promise<UserProfile | null> {
+    const { data } = await supabase.from("user_profile").select("*").limit(1).single();
+    return data;
   }
 
   async createProfile(profile: InsertUserProfile): Promise<UserProfile> {
-    return db.insert(userProfile).values(profile).returning().get();
+    const { data, error } = await supabase.from("user_profile").insert(profile).select().single();
+    if (error) throw error;
+    return data!;
   }
 
-  async updateProfile(id: number, data: Partial<InsertUserProfile>): Promise<UserProfile | undefined> {
-    return db.update(userProfile).set(data).where(eq(userProfile.id, id)).returning().get();
+  async updateProfile(id: number, updates: Partial<InsertUserProfile>): Promise<UserProfile | null> {
+    const { data, error } = await supabase.from("user_profile").update(updates).eq("id", id).select().single();
+    if (error) throw error;
+    return data;
   }
 
-  // Medications
+  // === Medications ===
   async getMedications(userId: number = 1): Promise<Medication[]> {
-    return db.select().from(medications).where(eq(medications.userId, userId)).all();
+    const { data } = await supabase.from("medications").select("*").eq("user_id", userId);
+    return data || [];
   }
 
-  async getMedication(id: number): Promise<Medication | undefined> {
-    return db.select().from(medications).where(eq(medications.id, id)).get();
+  async getMedication(id: number): Promise<Medication | null> {
+    const { data } = await supabase.from("medications").select("*").eq("id", id).single();
+    return data;
   }
 
   async createMedication(med: InsertMedication): Promise<Medication> {
-    return db.insert(medications).values(med).returning().get();
+    const { data, error } = await supabase.from("medications").insert(med).select().single();
+    if (error) throw error;
+    return data!;
   }
 
-  async updateMedication(id: number, data: Partial<InsertMedication>): Promise<Medication | undefined> {
-    return db.update(medications).set(data).where(eq(medications.id, id)).returning().get();
+  async updateMedication(id: number, updates: Partial<InsertMedication>): Promise<Medication | null> {
+    const { data, error } = await supabase.from("medications").update(updates).eq("id", id).select().single();
+    if (error) throw error;
+    return data;
   }
 
   async deleteMedication(id: number): Promise<void> {
-    db.delete(medications).where(eq(medications.id, id)).run();
+    await supabase.from("medications").delete().eq("id", id);
   }
 
-  // Dose logs
+  // === Dose Logs ===
   async getDoseLogs(date: string, userId: number = 1): Promise<DoseLog[]> {
-    return db.select().from(doseLogs)
-      .where(and(eq(doseLogs.scheduledDate, date), eq(doseLogs.userId, userId)))
-      .all();
+    const { data } = await supabase
+      .from("dose_logs")
+      .select("*")
+      .eq("scheduled_date", date)
+      .eq("user_id", userId);
+    return data || [];
   }
 
   async getDoseLogsForMed(medicationId: number, limit: number = 30): Promise<DoseLog[]> {
-    return db.select().from(doseLogs)
-      .where(eq(doseLogs.medicationId, medicationId))
-      .orderBy(desc(doseLogs.scheduledDate))
-      .limit(limit)
-      .all();
+    const { data } = await supabase
+      .from("dose_logs")
+      .select("*")
+      .eq("medication_id", medicationId)
+      .order("scheduled_date", { ascending: false })
+      .limit(limit);
+    return data || [];
   }
 
   async createDoseLog(log: InsertDoseLog): Promise<DoseLog> {
-    return db.insert(doseLogs).values(log).returning().get();
+    const { data, error } = await supabase.from("dose_logs").insert(log).select().single();
+    if (error) throw error;
+    return data!;
   }
 
-  async updateDoseLog(id: number, data: Partial<InsertDoseLog>): Promise<DoseLog | undefined> {
-    return db.update(doseLogs).set(data).where(eq(doseLogs.id, id)).returning().get();
+  async updateDoseLog(id: number, updates: Partial<InsertDoseLog>): Promise<DoseLog | null> {
+    const { data, error } = await supabase.from("dose_logs").update(updates).eq("id", id).select().single();
+    if (error) throw error;
+    return data;
   }
 
-  // Chat
+  // === Chat ===
   async getChatMessages(userId: number = 1): Promise<ChatMessage[]> {
-    return db.select().from(chatMessages)
-      .where(eq(chatMessages.userId, userId))
-      .orderBy(chatMessages.createdAt)
-      .all();
+    const { data } = await supabase
+      .from("chat_messages")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: true });
+    return data || [];
   }
 
   async createChatMessage(msg: InsertChatMessage): Promise<ChatMessage> {
-    return db.insert(chatMessages).values(msg).returning().get();
+    const { data, error } = await supabase.from("chat_messages").insert(msg).select().single();
+    if (error) throw error;
+    return data!;
   }
 
   async updateChatFeedback(id: number, feedback: string): Promise<void> {
-    db.update(chatMessages).set({ feedback }).where(eq(chatMessages.id, id)).run();
+    await supabase.from("chat_messages").update({ feedback }).eq("id", id);
   }
 
   async clearChat(userId: number = 1): Promise<void> {
-    db.delete(chatMessages).where(eq(chatMessages.userId, userId)).run();
+    await supabase.from("chat_messages").delete().eq("user_id", userId);
   }
 
-  // Family
+  // === Family ===
   async getFamilyMembers(): Promise<FamilyMember[]> {
-    return db.select().from(familyMembers).all();
+    const { data } = await supabase.from("family_members").select("*");
+    return data || [];
   }
 
-  async getFamilyMember(id: number): Promise<FamilyMember | undefined> {
-    return db.select().from(familyMembers).where(eq(familyMembers.id, id)).get();
+  async getFamilyMember(id: number): Promise<FamilyMember | null> {
+    const { data } = await supabase.from("family_members").select("*").eq("id", id).single();
+    return data;
   }
 
   async createFamilyMember(member: InsertFamilyMember): Promise<FamilyMember> {
-    return db.insert(familyMembers).values(member).returning().get();
+    const { data, error } = await supabase.from("family_members").insert(member).select().single();
+    if (error) throw error;
+    return data!;
   }
 
-  async updateFamilyMember(id: number, data: Partial<InsertFamilyMember>): Promise<FamilyMember | undefined> {
-    return db.update(familyMembers).set(data).where(eq(familyMembers.id, id)).returning().get();
+  async updateFamilyMember(id: number, updates: Partial<InsertFamilyMember>): Promise<FamilyMember | null> {
+    const { data, error } = await supabase.from("family_members").update(updates).eq("id", id).select().single();
+    if (error) throw error;
+    return data;
   }
 
   async deleteFamilyMember(id: number): Promise<void> {
-    db.delete(familyMembers).where(eq(familyMembers.id, id)).run();
+    await supabase.from("family_members").delete().eq("id", id);
   }
 
-  // Family medications
+  // === Family Medications ===
   async getFamilyMedications(familyMemberId: number): Promise<FamilyMedication[]> {
-    return db.select().from(familyMedications)
-      .where(eq(familyMedications.familyMemberId, familyMemberId))
-      .all();
+    const { data } = await supabase
+      .from("family_medications")
+      .select("*")
+      .eq("family_member_id", familyMemberId);
+    return data || [];
   }
 
   async createFamilyMedication(med: InsertFamilyMedication): Promise<FamilyMedication> {
-    return db.insert(familyMedications).values(med).returning().get();
+    const { data, error } = await supabase.from("family_medications").insert(med).select().single();
+    if (error) throw error;
+    return data!;
   }
 
-  // Nudges
+  // === Nudges ===
   async getNudges(familyMemberId: number): Promise<Nudge[]> {
-    return db.select().from(nudges)
-      .where(eq(nudges.familyMemberId, familyMemberId))
-      .orderBy(desc(nudges.sentAt))
-      .all();
+    const { data } = await supabase
+      .from("nudges")
+      .select("*")
+      .eq("family_member_id", familyMemberId)
+      .order("sent_at", { ascending: false });
+    return data || [];
   }
 
   async createNudge(nudge: InsertNudge): Promise<Nudge> {
-    return db.insert(nudges).values(nudge).returning().get();
+    const { data, error } = await supabase.from("nudges").insert(nudge).select().single();
+    if (error) throw error;
+    return data!;
   }
 
-  // Health tips
+  // === Health Tips ===
   async getHealthTips(): Promise<HealthTip[]> {
-    return db.select().from(healthTips).all();
-  }
-
-  // Seed the database with sample data
-  async seed(): Promise<void> {
-    // Check if already seeded
-    const existing = db.select().from(userProfile).get();
-    if (existing) return;
-
-    // Create user profile
-    db.insert(userProfile).values({
-      name: "Jordan",
-      streakDays: 12,
-      lastStreakDate: new Date().toISOString().split("T")[0],
-      darkMode: 0,
-    }).run();
-
-    const now = new Date();
-    const today = now.toISOString().split("T")[0];
-
-    // Seed medications
-    const meds = [
-      {
-        userId: 1,
-        name: "Lisinopril",
-        doseStrength: "10",
-        doseUnit: "mg",
-        form: "Tablet",
-        purpose: "Blood pressure",
-        doctor: "Dr. Chen",
-        pharmacy: "CVS Pharmacy",
-        frequency: "Once daily",
-        scheduleTimes: '["08:00"]',
-        pillCount: 24,
-        status: "active",
-        isCritical: 0,
-        createdAt: today,
-      },
-      {
-        userId: 1,
-        name: "Metformin",
-        doseStrength: "500",
-        doseUnit: "mg",
-        form: "Tablet",
-        purpose: "Blood sugar",
-        doctor: "Dr. Patel",
-        pharmacy: "Walgreens",
-        frequency: "Twice daily",
-        scheduleTimes: '["08:00","20:00"]',
-        pillCount: 45,
-        status: "active",
-        isCritical: 0,
-        createdAt: today,
-      },
-      {
-        userId: 1,
-        name: "Vitamin D3",
-        doseStrength: "2000",
-        doseUnit: "IU",
-        form: "Capsule",
-        purpose: "Bone health",
-        frequency: "Once daily",
-        scheduleTimes: '["08:00"]',
-        pillCount: 60,
-        status: "active",
-        isCritical: 0,
-        createdAt: today,
-      },
-      {
-        userId: 1,
-        name: "Atorvastatin",
-        doseStrength: "20",
-        doseUnit: "mg",
-        form: "Tablet",
-        purpose: "Cholesterol",
-        doctor: "Dr. Chen",
-        pharmacy: "CVS Pharmacy",
-        frequency: "Once daily",
-        scheduleTimes: '["21:00"]',
-        pillCount: 8,
-        status: "active",
-        isCritical: 0,
-        createdAt: today,
-      },
-    ];
-
-    for (const med of meds) {
-      db.insert(medications).values(med).run();
-    }
-
-    // Seed dose logs for today
-    const doseLogEntries = [
-      { medicationId: 1, userId: 1, scheduledTime: "08:00", scheduledDate: today, status: "taken", confirmedAt: `${today}T08:05:00` },
-      { medicationId: 2, userId: 1, scheduledTime: "08:00", scheduledDate: today, status: "taken", confirmedAt: `${today}T08:05:00` },
-      { medicationId: 3, userId: 1, scheduledTime: "08:00", scheduledDate: today, status: "taken", confirmedAt: `${today}T08:06:00` },
-      { medicationId: 2, userId: 1, scheduledTime: "20:00", scheduledDate: today, status: "pending" },
-      { medicationId: 4, userId: 1, scheduledTime: "21:00", scheduledDate: today, status: "pending" },
-    ];
-
-    for (const log of doseLogEntries) {
-      db.insert(doseLogs).values(log).run();
-    }
-
-    // Seed some historical dose logs (past 14 days)
-    for (let i = 1; i <= 14; i++) {
-      const d = new Date(now);
-      d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split("T")[0];
-      // All meds taken on past days
-      db.insert(doseLogs).values({ medicationId: 1, userId: 1, scheduledTime: "08:00", scheduledDate: dateStr, status: "taken", confirmedAt: `${dateStr}T08:10:00` }).run();
-      db.insert(doseLogs).values({ medicationId: 2, userId: 1, scheduledTime: "08:00", scheduledDate: dateStr, status: "taken", confirmedAt: `${dateStr}T08:10:00` }).run();
-      db.insert(doseLogs).values({ medicationId: 3, userId: 1, scheduledTime: "08:00", scheduledDate: dateStr, status: "taken", confirmedAt: `${dateStr}T08:11:00` }).run();
-      db.insert(doseLogs).values({ medicationId: 2, userId: 1, scheduledTime: "20:00", scheduledDate: dateStr, status: "taken", confirmedAt: `${dateStr}T20:05:00` }).run();
-      db.insert(doseLogs).values({ medicationId: 4, userId: 1, scheduledTime: "21:00", scheduledDate: dateStr, status: "taken", confirmedAt: `${dateStr}T21:03:00` }).run();
-    }
-
-    // Seed family members
-    db.insert(familyMembers).values({
-      name: "Mom",
-      relationship: "Parent",
-      uiMode: "elder",
-      alertEnabled: 1,
-      alertDelay: 60,
-      status: "green",
-    }).run();
-
-    db.insert(familyMembers).values({
-      name: "Dad",
-      relationship: "Parent",
-      uiMode: "elder",
-      alertEnabled: 1,
-      alertDelay: 30,
-      status: "amber",
-    }).run();
-
-    // Seed family medications
-    db.insert(familyMedications).values({
-      familyMemberId: 1,
-      name: "Amlodipine",
-      doseStrength: "5",
-      doseUnit: "mg",
-      form: "Tablet",
-      scheduleTimes: '["09:00"]',
-      status: "active",
-    }).run();
-
-    db.insert(familyMedications).values({
-      familyMemberId: 2,
-      name: "Warfarin",
-      doseStrength: "5",
-      doseUnit: "mg",
-      form: "Tablet",
-      scheduleTimes: '["18:00"]',
-      status: "active",
-    }).run();
-
-    // Seed health tips
-    const tips = [
-      { title: "Stay Hydrated", content: "Drink a full glass of water when taking your medications. It helps your body absorb them better and reduces the risk of stomach irritation.", category: "general" },
-      { title: "Consistent Timing", content: "Taking your medications at the same time each day helps maintain steady levels in your bloodstream, making them more effective.", category: "adherence" },
-      { title: "Food Matters", content: "Some medications work best with food, others on an empty stomach. Check with your pharmacist about the best time relative to meals.", category: "nutrition" },
-      { title: "Don't Double Up", content: "If you miss a dose, don't take two next time. Usually, take it as soon as you remember — unless it's almost time for your next dose.", category: "safety" },
-      { title: "Storage Counts", content: "Store medications in a cool, dry place — not the bathroom cabinet. Heat and humidity can reduce their effectiveness.", category: "storage" },
-      { title: "Grapefruit Alert", content: "Grapefruit interacts with many common medications including statins and blood pressure drugs. Ask your pharmacist if it affects yours.", category: "nutrition" },
-      { title: "Track Side Effects", content: "Keep a simple log of how you feel after starting a new medication. This helps your doctor make better decisions at your next visit.", category: "safety" },
-      { title: "Refill Early", content: "Don't wait until you run out. Request refills when you have a 7-day supply left to avoid gaps in your treatment.", category: "adherence" },
-      { title: "Move Your Body", content: "Even 15 minutes of walking can improve how well your blood pressure and diabetes medications work.", category: "lifestyle" },
-      { title: "Sleep & Meds", content: "Some medications can affect your sleep. If you notice changes, talk to your doctor — the timing of your dose might be the fix.", category: "lifestyle" },
-      { title: "Alcohol Awareness", content: "Alcohol can interact with many medications, including pain relievers and blood thinners. Even moderate amounts can cause problems.", category: "safety" },
-      { title: "Vitamin K & Warfarin", content: "If you take a blood thinner like warfarin, keep your vitamin K intake consistent. Sudden changes in leafy greens can affect your levels.", category: "nutrition" },
-    ];
-
-    for (const tip of tips) {
-      db.insert(healthTips).values(tip).run();
-    }
+    const { data } = await supabase.from("health_tips").select("*");
+    return data || [];
   }
 }
 
-export const storage = new DatabaseStorage();
+export const storage = new SupabaseStorage();

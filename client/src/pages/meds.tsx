@@ -30,7 +30,7 @@ function getRefillBadge(pillCount: number | null): { text: string; color: string
 // MedCard component
 function MedCard({ med, onEdit, onDetail }: { med: Medication; onEdit: () => void; onDetail: () => void }) {
   const [showMenu, setShowMenu] = useState(false);
-  const refillBadge = getRefillBadge(med.pillCount);
+  const refillBadge = getRefillBadge(med.pill_count);
 
   const deleteMed = useMutation({
     mutationFn: async () => {
@@ -63,7 +63,7 @@ function MedCard({ med, onEdit, onDetail }: { med: Medication; onEdit: () => voi
     },
   });
 
-  const times: string[] = JSON.parse(med.scheduleTimes);
+  const times: string[] = JSON.parse(med.schedule_times);
 
   return (
     <motion.div
@@ -90,7 +90,7 @@ function MedCard({ med, onEdit, onDetail }: { med: Medication; onEdit: () => voi
             )}
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {med.doseStrength} {med.doseUnit} {med.form} · {med.frequency}
+            {med.dose_strength} {med.dose_unit} {med.form} · {med.frequency}
           </p>
           <p className="text-xs text-muted-foreground mt-0.5">
             {times.map(formatTime).join(", ")}
@@ -153,7 +153,7 @@ function MedCard({ med, onEdit, onDetail }: { med: Medication; onEdit: () => voi
 // Medication detail view
 function MedDetail({ med, onClose }: { med: Medication; onClose: () => void }) {
   const [activeTab, setActiveTab] = useState<"overview" | "history" | "info">("overview");
-  const times: string[] = JSON.parse(med.scheduleTimes);
+  const times: string[] = JSON.parse(med.schedule_times);
 
   const { data: doseHistory = [] } = useQuery<DoseLog[]>({
     queryKey: ["/api/doses/medication", med.id],
@@ -171,7 +171,7 @@ function MedDetail({ med, onClose }: { med: Medication; onClose: () => void }) {
   });
 
   const getHeatmapColor = (date: string) => {
-    const logs = doseHistory.filter(d => d.scheduledDate === date);
+    const logs = doseHistory.filter(d => d.scheduled_date === date);
     if (logs.length === 0) return "bg-muted";
     const taken = logs.filter(d => d.status === "taken").length;
     if (taken === logs.length) return "bg-[hsl(var(--nurilo-success))]";
@@ -199,7 +199,7 @@ function MedDetail({ med, onClose }: { med: Medication; onClose: () => void }) {
         </button>
         <div>
           <h2 className="text-lg font-bold" data-testid="med-detail-name">{med.name}</h2>
-          <p className="text-xs text-muted-foreground">{med.doseStrength} {med.doseUnit} {med.form}</p>
+          <p className="text-xs text-muted-foreground">{med.dose_strength} {med.dose_unit} {med.form}</p>
         </div>
         <span className={`ml-auto text-[10px] font-medium px-2 py-0.5 rounded-xl ${
           med.status === "active" ? "bg-[hsl(var(--nurilo-success))]/10 text-[hsl(var(--nurilo-success))]" :
@@ -234,10 +234,10 @@ function MedDetail({ med, onClose }: { med: Medication; onClose: () => void }) {
               <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Schedule</p>
               <p className="text-sm mt-1">{med.frequency} — {times.map(formatTime).join(", ")}</p>
             </div>
-            {med.pillCount !== null && (
+            {med.pill_count !== null && (
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Supply</p>
-                <p className="text-sm mt-1">{med.pillCount} pills remaining</p>
+                <p className="text-sm mt-1">{med.pill_count} pills remaining</p>
               </div>
             )}
             {med.purpose && (
@@ -323,34 +323,34 @@ function MedDetail({ med, onClose }: { med: Medication; onClose: () => void }) {
 function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
   const isEdit = !!med;
   const [name, setName] = useState(med?.name || "");
-  const [doseStrength, setDoseStrength] = useState(med?.doseStrength || "");
-  const [doseUnit, setDoseUnit] = useState(med?.doseUnit || "mg");
+  const [doseStrength, setDoseStrength] = useState(med?.dose_strength || "");
+  const [doseUnit, setDoseUnit] = useState(med?.dose_unit || "mg");
   const [form, setForm] = useState(med?.form || "Tablet");
   const [purpose, setPurpose] = useState(med?.purpose || "");
   const [doctor, setDoctor] = useState(med?.doctor || "");
   const [pharmacy, setPharmacy] = useState(med?.pharmacy || "");
   const [frequency, setFrequency] = useState(med?.frequency || "Once daily");
-  const [times, setTimes] = useState<string[]>(med ? JSON.parse(med.scheduleTimes) : ["08:00"]);
-  const [pillCount, setPillCount] = useState<string>(med?.pillCount?.toString() || "");
+  const [times, setTimes] = useState<string[]>(med ? JSON.parse(med.schedule_times) : ["08:00"]);
+  const [pillCount, setPillCount] = useState<string>(med?.pill_count?.toString() || "");
   const [interactionWarning, setInteractionWarning] = useState<{ severity: string; message: string } | null>(null);
 
   const saveMed = useMutation({
     mutationFn: async () => {
       const payload = {
         name,
-        doseStrength,
-        doseUnit,
+        dose_strength: doseStrength,
+        dose_unit: doseUnit,
         form,
         purpose: purpose || undefined,
         doctor: doctor || undefined,
         pharmacy: pharmacy || undefined,
         frequency,
-        scheduleTimes: JSON.stringify(times),
-        pillCount: pillCount ? parseInt(pillCount) : null,
-        userId: 1,
+        schedule_times: JSON.stringify(times),
+        pill_count: pillCount ? parseInt(pillCount) : null,
+        user_id: 1,
         status: med?.status || "active",
-        isCritical: med?.isCritical || 0,
-        createdAt: med?.createdAt || new Date().toISOString().split("T")[0],
+        is_critical: med?.is_critical || 0,
+        created_at: med?.created_at || new Date().toISOString().split("T")[0],
       };
 
       if (isEdit) {
