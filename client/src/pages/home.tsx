@@ -1,5 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { queryClient } from "@/lib/queryClient";
+import * as api from "@/lib/api";
 import { Flame, Check, X, Activity, Calendar, ChevronRight, Lightbulb } from "lucide-react";
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -177,30 +178,34 @@ export default function HomePage() {
   const today = new Date().toISOString().split("T")[0];
 
   const { data: profile } = useQuery<UserProfile | null>({
-    queryKey: ["/api/profile"],
+    queryKey: ["profile"],
+    queryFn: api.getProfile,
   });
 
   const { data: medications = [] } = useQuery<Medication[]>({
-    queryKey: ["/api/medications"],
+    queryKey: ["medications"],
+    queryFn: () => api.getMedications(),
   });
 
   const { data: doseLogs = [] } = useQuery<DoseLog[]>({
-    queryKey: ["/api/doses", today],
+    queryKey: ["doses", today],
+    queryFn: () => api.getDoseLogs(today),
   });
 
   const { data: tips = [] } = useQuery<HealthTip[]>({
-    queryKey: ["/api/tips"],
+    queryKey: ["tips"],
+    queryFn: api.getHealthTips,
   });
 
   const confirmDose = useMutation({
     mutationFn: async (id: number) => {
-      await apiRequest("PATCH", `/api/doses/${id}`, {
+      await api.updateDoseLog(id, {
         status: "taken",
         confirmed_at: new Date().toISOString(),
       });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/doses", today] });
+      queryClient.invalidateQueries({ queryKey: ["doses", today] });
       // Check if all doses are now taken
       const remaining = doseLogs.filter(d => d.status === "pending");
       if (remaining.length === 1) {
@@ -211,23 +216,23 @@ export default function HomePage() {
 
   const skipDose = useMutation({
     mutationFn: async (id: number) => {
-      await apiRequest("PATCH", `/api/doses/${id}`, { status: "skipped" });
+      await api.updateDoseLog(id, { status: "skipped" });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/doses", today] });
+      queryClient.invalidateQueries({ queryKey: ["doses", today] });
     },
   });
 
   const saveName = useMutation({
     mutationFn: async (name: string) => {
       if (profile) {
-        await apiRequest("PATCH", `/api/profile/${profile.id}`, { name });
+        await api.updateProfile(profile.id, { name });
       } else {
-        await apiRequest("POST", "/api/profile", { name, streak_days: 0, dark_mode: 0 });
+        await api.createProfile({ name, streak_days: 0, dark_mode: 0 });
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/profile"] });
+      queryClient.invalidateQueries({ queryKey: ["profile"] });
       setShowNameInput(false);
     },
   });

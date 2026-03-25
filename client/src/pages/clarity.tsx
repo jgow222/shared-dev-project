@@ -1,5 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { queryClient } from "@/lib/queryClient";
+import * as api from "@/lib/api";
 import { Send, ThumbsUp, ThumbsDown, Sparkles, MoreVertical, Trash2, MessageCircle } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -100,35 +101,35 @@ export default function ClarityPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const { data: messages = [] } = useQuery<ChatMessage[]>({
-    queryKey: ["/api/chat"],
+    queryKey: ["chat"],
+    queryFn: () => api.getChatMessages(),
   });
 
   const sendMessage = useMutation({
     mutationFn: async (content: string) => {
-      const res = await apiRequest("POST", "/api/chat", { content });
-      return res.json();
+      return api.sendChatMessage(content);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/chat"] });
+      queryClient.invalidateQueries({ queryKey: ["chat"] });
       setInput("");
     },
   });
 
   const sendFeedback = useMutation({
     mutationFn: async ({ id, feedback }: { id: number; feedback: string }) => {
-      await apiRequest("PATCH", `/api/chat/${id}/feedback`, { feedback });
+      await api.updateChatFeedback(id, feedback);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/chat"] });
+      queryClient.invalidateQueries({ queryKey: ["chat"] });
     },
   });
 
-  const clearChat = useMutation({
+  const clearChatMut = useMutation({
     mutationFn: async () => {
-      await apiRequest("DELETE", "/api/chat");
+      await api.clearChat();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/chat"] });
+      queryClient.invalidateQueries({ queryKey: ["chat"] });
       setShowMenu(false);
     },
   });
@@ -200,7 +201,7 @@ export default function ClarityPage() {
                   className="absolute right-0 top-10 z-50 w-44 bg-card border border-border rounded-lg shadow-lg overflow-hidden"
                 >
                   <button
-                    onClick={() => clearChat.mutate()}
+                    onClick={() => clearChatMut.mutate()}
                     className="w-full px-3 py-2.5 text-left text-sm flex items-center gap-2 text-destructive hover:bg-destructive/10 transition-colors"
                     data-testid="clear-chat-btn"
                   >

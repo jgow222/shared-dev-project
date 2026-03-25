@@ -1,5 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { queryClient } from "@/lib/queryClient";
+import * as api from "@/lib/api";
 import {
   Plus, MoreVertical, Pill, AlertTriangle, Pause, Archive,
   Trash2, Edit, ChevronRight, Package, X, Check
@@ -34,10 +35,10 @@ function MedCard({ med, onEdit, onDetail }: { med: Medication; onEdit: () => voi
 
   const deleteMed = useMutation({
     mutationFn: async () => {
-      await apiRequest("DELETE", `/api/medications/${med.id}`);
+      await api.deleteMedication(med.id);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/medications"] });
+      queryClient.invalidateQueries({ queryKey: ["medications"] });
       setShowMenu(false);
     },
   });
@@ -45,20 +46,20 @@ function MedCard({ med, onEdit, onDetail }: { med: Medication; onEdit: () => voi
   const togglePause = useMutation({
     mutationFn: async () => {
       const newStatus = med.status === "paused" ? "active" : "paused";
-      await apiRequest("PATCH", `/api/medications/${med.id}`, { status: newStatus });
+      await api.updateMedication(med.id, { status: newStatus });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/medications"] });
+      queryClient.invalidateQueries({ queryKey: ["medications"] });
       setShowMenu(false);
     },
   });
 
   const archiveMed = useMutation({
     mutationFn: async () => {
-      await apiRequest("PATCH", `/api/medications/${med.id}`, { status: "archived" });
+      await api.updateMedication(med.id, { status: "archived" });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/medications"] });
+      queryClient.invalidateQueries({ queryKey: ["medications"] });
       setShowMenu(false);
     },
   });
@@ -156,11 +157,8 @@ function MedDetail({ med, onClose }: { med: Medication; onClose: () => void }) {
   const times: string[] = JSON.parse(med.schedule_times);
 
   const { data: doseHistory = [] } = useQuery<DoseLog[]>({
-    queryKey: ["/api/doses/medication", med.id],
-    queryFn: async () => {
-      const res = await apiRequest("GET", `/api/doses/medication/${med.id}`);
-      return res.json();
-    },
+    queryKey: ["doses", "medication", med.id],
+    queryFn: () => api.getDoseLogsForMed(med.id),
   });
 
   // 30-day calendar heatmap
@@ -307,7 +305,7 @@ function MedDetail({ med, onClose }: { med: Medication; onClose: () => void }) {
       {activeTab === "info" && (
         <div className="bg-card rounded-lg border border-border p-4 space-y-3">
           <p className="text-sm text-muted-foreground">
-            General information about {med.name} would appear here, including common side effects, 
+            General information about {med.name} would appear here, including common side effects,
             drug interactions, and storage instructions.
           </p>
           <p className="text-xs text-muted-foreground italic">
@@ -354,22 +352,21 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
       };
 
       if (isEdit) {
-        await apiRequest("PATCH", `/api/medications/${med!.id}`, payload);
+        await api.updateMedication(med!.id, payload);
       } else {
         // Check interactions before saving
-        const interactionRes = await apiRequest("POST", "/api/interactions/check", { medicationName: name });
-        const interactionData = await interactionRes.json();
+        const interactionData = await api.checkInteractions(name);
         if (interactionData.interactions?.length > 0) {
           const worst = interactionData.interactions[0];
           setInteractionWarning(worst);
         }
-        await apiRequest("POST", "/api/medications", payload);
+        await api.createMedication(payload as any);
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/medications"] });
+      queryClient.invalidateQueries({ queryKey: ["medications"] });
       const today = new Date().toISOString().split("T")[0];
-      queryClient.invalidateQueries({ queryKey: ["/api/doses", today] });
+      queryClient.invalidateQueries({ queryKey: ["doses", today] });
       onClose();
     },
   });
@@ -593,7 +590,8 @@ export default function MedsPage() {
   const [selectedMed, setSelectedMed] = useState<Medication | null>(null);
 
   const { data: meds = [], isLoading } = useQuery<Medication[]>({
-    queryKey: ["/api/medications"],
+    queryKey: ["medications"],
+    queryFn: () => api.getMedications(),
   });
 
   const activeMeds = meds.filter(m => m.status === "active");

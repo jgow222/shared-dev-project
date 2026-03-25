@@ -1,5 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { queryClient } from "@/lib/queryClient";
+import * as api from "@/lib/api";
 import {
   Plus, Users, Bell, Send, MoreVertical, Trash2, Edit,
   ChevronRight, X, Check, AlertTriangle, Heart
@@ -99,16 +100,18 @@ function MemberDetail({ member, onClose }: { member: FamilyMember; onClose: () =
   const [showMenu, setShowMenu] = useState(false);
 
   const { data: meds = [] } = useQuery<FamilyMedication[]>({
-    queryKey: ["/api/family", member.id, "medications"],
-    queryFn: async () => {
-      const res = await apiRequest("GET", `/api/family/${member.id}/medications`);
-      return res.json();
-    },
+    queryKey: ["family", member.id, "medications"],
+    queryFn: () => api.getFamilyMedications(member.id),
   });
 
   const sendNudge = useMutation({
     mutationFn: async (message: string) => {
-      await apiRequest("POST", `/api/family/${member.id}/nudges`, { message });
+      await api.createNudge({
+        family_member_id: member.id,
+        message,
+        sent_at: new Date().toISOString(),
+        response: null,
+      });
     },
     onSuccess: () => {
       setShowNudge(false);
@@ -118,20 +121,20 @@ function MemberDetail({ member, onClose }: { member: FamilyMember; onClose: () =
 
   const deleteMember = useMutation({
     mutationFn: async () => {
-      await apiRequest("DELETE", `/api/family/${member.id}`);
+      await api.deleteFamilyMember(member.id);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/family"] });
+      queryClient.invalidateQueries({ queryKey: ["family"] });
       onClose();
     },
   });
 
   const confirmOnBehalf = useMutation({
     mutationFn: async () => {
-      await apiRequest("PATCH", `/api/family/${member.id}`, { status: "green" });
+      await api.updateFamilyMember(member.id, { status: "green" });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/family"] });
+      queryClient.invalidateQueries({ queryKey: ["family"] });
     },
   });
 
@@ -305,7 +308,7 @@ function AddMemberWizard({ onClose }: { onClose: () => void }) {
 
   const createMember = useMutation({
     mutationFn: async () => {
-      await apiRequest("POST", "/api/family", {
+      await api.createFamilyMember({
         name,
         relationship,
         ui_mode: uiMode,
@@ -315,7 +318,7 @@ function AddMemberWizard({ onClose }: { onClose: () => void }) {
       });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/family"] });
+      queryClient.invalidateQueries({ queryKey: ["family"] });
       onClose();
     },
   });
@@ -447,7 +450,8 @@ export default function FamilyPage() {
   const [selectedMember, setSelectedMember] = useState<FamilyMember | null>(null);
 
   const { data: members = [], isLoading } = useQuery<FamilyMember[]>({
-    queryKey: ["/api/family"],
+    queryKey: ["family"],
+    queryFn: api.getFamilyMembers,
   });
 
   if (view === "add") {
