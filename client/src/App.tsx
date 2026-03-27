@@ -11,7 +11,6 @@ import MedsPage from "@/pages/meds";
 import ClarityPage from "@/pages/clarity";
 import FamilyPage from "@/pages/family";
 import NotFound from "@/pages/not-found";
-import { PerplexityAttribution } from "@/components/PerplexityAttribution";
 import { SplashScreen } from "@/components/SplashScreen";
 
 /* ─── Theme Context ─── */
@@ -247,10 +246,9 @@ function AppHeader() {
 function PageWrapper({ children }: { children: React.ReactNode }) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -4 }}
-      transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.18 }}
     >
       {children}
     </motion.div>
@@ -264,7 +262,6 @@ function AppRouter() {
     <div className="min-h-screen bg-background">
       <AppHeader />
       <main className="max-w-lg mx-auto pb-32">
-        <AnimatePresence mode="wait">
           <Switch key={location}>
             <Route path="/">
               <PageWrapper><HomePage /></PageWrapper>
@@ -285,11 +282,7 @@ function AppRouter() {
               <PageWrapper><NotFound /></PageWrapper>
             </Route>
           </Switch>
-        </AnimatePresence>
       </main>
-      <div className="max-w-lg mx-auto px-4 pb-28">
-        <PerplexityAttribution />
-      </div>
       <BottomNav />
     </div>
   );
