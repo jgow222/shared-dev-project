@@ -461,8 +461,8 @@ function parseMedicationLabel(text: string): Partial<{ name: string; strength: s
 // Sends a base64 JPEG frame to Claude Vision (via Supabase edge function)
 // Returns structured medication data: { name, strength, unit, form, brand, confidence }
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://vytsmfnzaidhpopbleqr.supabase.co";
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5dHNtZm56YWlkaHBvcGJsZXFyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzOTIwNTMsImV4cCI6MjA4OTk2ODA1M30.Ff0mTzjIeXLNqkBmW5Sv16C9_YkANhqs6QqIINS_ARA";
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://qpmjghocajyvugjxnkdn.supabase.co";
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFwbWpnaG9jYWp5dnVnanhua2RuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1ODM4MDQsImV4cCI6MjA5MDE1OTgwNH0.fzHBvHic5W6BZVUfD-dXEj0x6MaBeM6GyGEUsu8vQt0";
 
 interface AIScanResult {
   name?: string;
