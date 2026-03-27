@@ -271,6 +271,7 @@ const FREQUENCY_OPTIONS = [
   { label: "Twice daily", times: 2, emoji: "2×" },
   { label: "3× daily", times: 3, emoji: "3×" },
   { label: "As needed", times: 0, emoji: "PRN" },
+  { label: "Specific days", times: 1, emoji: "Cal" },
 ];
 
 function formatTime(time: string): string {
@@ -1083,27 +1084,27 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
               </motion.button>
             )}
 
-            {/* Scan result actions */}
+            {/* Scan result actions — stacked for comfortable tapping */}
             {stage === "result" && (
-              <>
+              <div className="flex flex-col gap-2 w-full">
                 <motion.button
-                  whileTap={{ scale: 0.92 }}
-                  onClick={tryAgain}
-                  className="h-14 px-4 rounded-2xl bg-white/10 text-white text-xs font-semibold border border-white/20 flex-shrink-0"
-                  data-testid="scan-again-btn"
-                >
-                  Try Again
-                </motion.button>
-                <motion.button
-                  whileTap={{ scale: 0.92 }}
+                  whileTap={{ scale: 0.97 }}
                   onClick={confirmResult}
-                  className="flex-1 h-14 rounded-2xl bg-primary text-primary-foreground font-bold flex items-center justify-center gap-2 shadow-xl"
+                  className="w-full h-16 rounded-2xl bg-primary text-primary-foreground font-bold text-base flex items-center justify-center gap-2.5 shadow-xl"
                   data-testid="confirm-scan-btn"
                 >
-                  <CheckIcon size={18} />
-                  Use This
+                  <CheckIcon size={20} />
+                  Use This Medication
                 </motion.button>
-              </>
+                <motion.button
+                  whileTap={{ scale: 0.97 }}
+                  onClick={tryAgain}
+                  className="w-full h-12 rounded-2xl bg-white/10 text-white text-sm font-semibold border border-white/20"
+                  data-testid="scan-again-btn"
+                >
+                  Scan Again
+                </motion.button>
+              </div>
             )}
           </div>
 
@@ -1362,10 +1363,22 @@ function FreqIcon({ label }: { label: string }) {
     </svg>
   );
   // As needed
-  return (
+  if (label === "As needed") return (
     <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round">
       <path d="M11 4v4M11 14v4M4 11h4M14 11h4" />
       <circle cx="11" cy="11" r="2.5" />
+    </svg>
+  );
+  // Specific days (calendar icon)
+  return (
+    <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round">
+      <rect x="3" y="4" width="16" height="15" rx="2" />
+      <line x1="3" y1="9" x2="19" y2="9" />
+      <line x1="7" y1="2" x2="7" y2="6" />
+      <line x1="15" y1="2" x2="15" y2="6" />
+      <circle cx="7" cy="14" r="1" fill="currentColor" stroke="none" />
+      <circle cx="11" cy="14" r="1" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="14" r="1" fill="currentColor" stroke="none" />
     </svg>
   );
 }
@@ -1388,6 +1401,10 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
   const [times, setTimes]             = useState<string[]>(
     med ? JSON.parse(med.schedule_times) : ["08:00"]
   );
+  // For "Specific days" frequency — which days of the week
+  const [scheduleDays, setScheduleDays] = useState<string[]>(
+    med?.schedule_days ? JSON.parse(med.schedule_days) : []
+  );
   const [purpose, setPurpose]         = useState(med?.purpose || "");
   const [doctor, setDoctor]           = useState(med?.doctor || "");
   const [pharmacy, setPharmacy]       = useState(med?.pharmacy || "");
@@ -1408,6 +1425,7 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
         pharmacy: pharmacy || undefined,
         frequency,
         schedule_times: JSON.stringify(times),
+        schedule_days: scheduleDays.length > 0 ? JSON.stringify(scheduleDays) : null,
         pill_count: pillCount ? parseInt(pillCount) : null,
         user_id: 1,
         status: med?.status || "active",
@@ -1734,6 +1752,36 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
               </div>
             </div>
 
+
+            {/* ── SPECIFIC DAYS PICKER ────────────────────────── */}
+            {frequency === "Specific days" && (
+              <div className="space-y-3">
+                <label className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">
+                  Which days?
+                </label>
+                <div className="grid grid-cols-7 gap-1.5">
+                  {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(day => {
+                    const selected = scheduleDays.includes(day);
+                    return (
+                      <motion.button
+                        key={day}
+                        whileTap={{ scale: 0.92 }}
+                        onClick={() => setScheduleDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day])}
+                        className={`h-12 rounded-xl text-xs font-bold transition-colors flex flex-col items-center justify-center ${selected ? "bg-primary text-primary-foreground" : "bg-card border border-border text-muted-foreground"}`}
+                        data-testid={`day-${day}`}
+                      >
+                        <span>{day.slice(0,1)}</span>
+                        <span className="text-[9px] opacity-60">{day.slice(1,3)}</span>
+                      </motion.button>
+                    );
+                  })}
+                </div>
+                {scheduleDays.length === 0 && (
+                  <p className="text-xs text-muted-foreground">Tap the days you take this medication</p>
+                )}
+              </div>
+            )}
+
             {/* ── TIMES ─────────────────────────────────────── */}
             {times.length > 0 && (
               <div className="space-y-3">
@@ -1897,6 +1945,7 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
 
 function MedCard({ med, onEdit, onDetail }: { med: Medication; onEdit: () => void; onDetail: () => void }) {
   const [showMenu, setShowMenu] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const refillBadge = getRefillBadge(med.pill_count);
 
   const deleteMed = useMutation({
@@ -1981,79 +2030,128 @@ function MedCard({ med, onEdit, onDetail }: { med: Medication; onEdit: () => voi
             )}
           </div>
 
-          {/* Menu button */}
-          <div className="relative">
+          {/* Visible Edit + Delete buttons — no hidden menu */}
+          <div className="flex items-center gap-1.5">
             <motion.button
               whileTap={{ scale: 0.88 }}
-              onClick={() => setShowMenu(!showMenu)}
-              className="p-1.5 rounded-full hover:bg-secondary transition-colors text-muted-foreground"
-              data-testid={`med-menu-${med.id}`}
+              onClick={onEdit}
+              className="flex items-center gap-1.5 px-3 h-8 rounded-lg bg-secondary text-foreground text-xs font-semibold"
+              data-testid={`edit-med-${med.id}`}
             >
-              <DotsVertIcon size={16} />
+              <EditIcon size={12} /> Edit
             </motion.button>
-
-            <AnimatePresence>
-              {showMenu && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)} />
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.93, y: -4 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.93, y: -4 }}
-                    transition={{ duration: 0.15 }}
-                    className="absolute right-0 top-9 z-50 w-44 bg-card border border-border rounded-xl shadow-lg overflow-hidden"
-                  >
-                    <button
-                      onClick={onEdit}
-                      className="w-full px-3.5 py-3 text-left text-sm flex items-center gap-2.5 hover:bg-secondary transition-colors"
-                      data-testid={`edit-med-${med.id}`}
-                    >
-                      <EditIcon size={14} /> Edit
-                    </button>
-                    <button
-                      onClick={() => togglePause.mutate()}
-                      className="w-full px-3.5 py-3 text-left text-sm flex items-center gap-2.5 hover:bg-secondary transition-colors"
-                      data-testid={`pause-med-${med.id}`}
-                    >
-                      {med.status === "paused" ? <PlayIcon size={14} /> : <PauseIcon size={14} />}
-                      {med.status === "paused" ? "Resume" : "Pause"}
-                    </button>
-                    <button
-                      onClick={() => archiveMed.mutate()}
-                      className="w-full px-3.5 py-3 text-left text-sm flex items-center gap-2.5 hover:bg-secondary transition-colors"
-                      data-testid={`archive-med-${med.id}`}
-                    >
-                      <ArchiveBoxIcon size={14} /> Archive
-                    </button>
-                    <div className="h-px bg-border mx-3" />
-                    <button
-                      onClick={() => deleteMed.mutate()}
-                      className="w-full px-3.5 py-3 text-left text-sm flex items-center gap-2.5 text-destructive hover:bg-destructive/10 transition-colors"
-                      data-testid={`delete-med-${med.id}`}
-                    >
-                      <TrashIcon size={14} /> Delete
-                    </button>
-                  </motion.div>
-                </>
-              )}
-            </AnimatePresence>
+            <motion.button
+              whileTap={{ scale: 0.88 }}
+              onClick={() => setShowDeleteConfirm(true)}
+              className="flex items-center gap-1.5 px-3 h-8 rounded-lg bg-destructive/10 text-destructive text-xs font-semibold"
+              data-testid={`delete-med-${med.id}`}
+            >
+              <TrashIcon size={12} /> Remove
+            </motion.button>
           </div>
         </div>
       </div>
+
+      {/* Delete confirmation bottom sheet */}
+      <AnimatePresence>
+        {showDeleteConfirm && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-40 bg-black/50"
+              onClick={() => setShowDeleteConfirm(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 60 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 60 }}
+              transition={{ type: "spring", damping: 28, stiffness: 300 }}
+              className="fixed bottom-0 left-0 right-0 z-50 bg-card rounded-t-3xl p-6 space-y-4"
+            >
+              <div className="w-10 h-1 bg-border rounded-full mx-auto" />
+              <div className="flex items-start gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-destructive/10 flex items-center justify-center flex-shrink-0">
+                  <TrashIcon size={20} />
+                </div>
+                <div>
+                  <p className="font-bold text-base">Remove {med.name}?</p>
+                  <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
+                    This will remove the medication and all its dose history. This cannot be undone.
+                  </p>
+                </div>
+              </div>
+              <motion.button
+                whileTap={{ scale: 0.97 }}
+                onClick={() => { deleteMed.mutate(); setShowDeleteConfirm(false); }}
+                disabled={deleteMed.isPending}
+                className="w-full h-14 rounded-2xl bg-destructive text-white font-bold text-base"
+                data-testid={`confirm-delete-${med.id}`}
+              >
+                {deleteMed.isPending ? "Removing…" : "Yes, Remove"}
+              </motion.button>
+              <motion.button
+                whileTap={{ scale: 0.97 }}
+                onClick={() => setShowDeleteConfirm(false)}
+                className="w-full h-12 rounded-2xl bg-secondary text-foreground font-semibold text-sm"
+              >
+                Keep It
+              </motion.button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
 
 // ─── MedDetail ───────────────────────────────────────────────────────────────
 
+// ── Med info database — curated, human-readable entries ──────────────────────
+const MED_INFO: Record<string, { uses: string; sideEffects: string; tips: string; storage: string }> = {
+  "ibuprofen": { uses: "Pain relief, fever reduction, and inflammation. Commonly used for headaches, muscle aches, arthritis, menstrual cramps, and minor injuries.", sideEffects: "Stomach upset, nausea, heartburn. Less commonly: dizziness, rash. Rarely: stomach bleeding with long-term use.", tips: "Always take with food or milk to protect your stomach. Don't use for more than 10 days for pain without a doctor's guidance.", storage: "Store at room temperature, away from heat and moisture." },
+  "acetaminophen": { uses: "Pain relief and fever reduction. Gentler on the stomach than NSAIDs. Good for headaches, mild to moderate pain.", sideEffects: "Generally well tolerated at recommended doses. High doses can harm the liver — especially with alcohol.", tips: "Do not exceed 4,000mg per day. Check other medications for hidden acetaminophen (Tylenol is in many cold/flu products).", storage: "Store below 77°F, keep away from moisture." },
+  "lisinopril": { uses: "Treats high blood pressure and heart failure. Also protects kidneys in people with diabetes.", sideEffects: "Dry cough (very common), dizziness when standing up, mild headache. Rarely: swelling of lips or tongue (seek care immediately).", tips: "Take at the same time each day. Don't skip doses — blood pressure can spike. Avoid potassium supplements unless directed.", storage: "Store at room temperature, protect from moisture." },
+  "metformin": { uses: "Controls blood sugar in type 2 diabetes. Often a first-line treatment.", sideEffects: "Nausea, stomach upset, diarrhea (common early on — usually improves). Metallic taste. Very rarely: lactic acidosis.", tips: "Take with meals to reduce stomach upset. Avoid heavy alcohol use. Stay hydrated.", storage: "Store at room temperature, away from heat." },
+  "atorvastatin": { uses: "Lowers LDL ('bad') cholesterol and triglycerides to reduce heart disease risk.", sideEffects: "Muscle soreness or weakness (tell your doctor). Headache, digestive upset. Rarely: liver problems.", tips: "Avoid grapefruit juice — it increases drug levels. Can be taken any time of day consistently.", storage: "Store at room temperature, away from moisture." },
+  "levothyroxine": { uses: "Replaces or supplements thyroid hormone in people with hypothyroidism.", sideEffects: "At correct dose: minimal. Too much: heart palpitations, weight loss, tremor, anxiety.", tips: "Take on an empty stomach, 30-60 min before breakfast for best absorption. Take calcium, iron, or antacids at least 4 hours apart.", storage: "Store at room temperature, away from heat and light." },
+  "warfarin": { uses: "Blood thinner that prevents and treats blood clots, deep vein thrombosis, and reduces stroke risk.", sideEffects: "Bruising, prolonged bleeding from cuts. Signs of serious bleeding: unusual bruising, blood in urine/stool, persistent bleeding.", tips: "Keep vitamin K intake (leafy greens) consistent — don't suddenly eat much more or less. Get regular INR checks.", storage: "Store at room temperature, away from light." },
+  "omeprazole": { uses: "Reduces stomach acid. Used for heartburn, GERD, ulcers, and protecting the stomach from NSAID use.", sideEffects: "Headache, stomach pain, diarrhea. Long-term use may lower magnesium and B12 levels.", tips: "Take 30-60 minutes before a meal for best effect. Don't take for more than 14 days without medical advice.", storage: "Store at room temperature, keep dry." },
+  "amlodipine": { uses: "Treats high blood pressure and chest pain (angina). Relaxes blood vessels.", sideEffects: "Swollen ankles or feet, flushing, headache, dizziness. Usually mild.", tips: "Take at the same time each day. Don't stop suddenly. Grapefruit may interact — ask your pharmacist.", storage: "Store at room temperature." },
+  "vitamin d": { uses: "Supports bone health, immune function, and mood. Many people are deficient, especially in winter or with limited sun exposure.", sideEffects: "Extremely rare at normal doses. High doses can cause nausea, weakness, or high calcium levels.", tips: "Take with a meal containing fat for best absorption. D3 is absorbed better than D2.", storage: "Store at room temperature, away from light." },
+  "vitamin d3": { uses: "Supports bone health, immune function, and mood. Many people are deficient, especially in winter or with limited sun exposure.", sideEffects: "Extremely rare at normal doses. High doses can cause nausea, weakness, or high calcium levels.", tips: "Take with a meal containing fat for best absorption. D3 is absorbed better than D2.", storage: "Store at room temperature, away from light." },
+  "melatonin": { uses: "Helps with sleep onset, jet lag, and circadian rhythm issues. A natural hormone produced by the body.", sideEffects: "Drowsiness, headache, dizziness (usually mild). Can make you groggy if taken too late.", tips: "Start with the lowest effective dose (0.5-1mg). Take 30-60 min before your target bedtime.", storage: "Store at room temperature, away from light." },
+  "aspirin": { uses: "Pain relief, fever, inflammation, and low-dose aspirin reduces heart attack and stroke risk in at-risk patients.", sideEffects: "Stomach irritation, heartburn, nausea. Increases bleeding risk. Avoid in children with viral illness.", tips: "Take with food or a full glass of water. Low-dose (81mg) daily aspirin is different from pain-relief dosing — your doctor should guide this.", storage: "Store at room temperature, away from moisture." },
+  "sertraline": { uses: "An antidepressant (SSRI) used for depression, anxiety, OCD, PTSD, and panic disorder.", sideEffects: "Nausea, headache, sleep changes, dry mouth (usually improve in 1-2 weeks). Sexual side effects possible.", tips: "Take consistently — effects build over 4-6 weeks. Don't stop abruptly. Take at the same time daily.", storage: "Store at room temperature, away from moisture." },
+  "losartan": { uses: "Treats high blood pressure and protects kidneys. An ARB (similar benefit to ACE inhibitors without the cough).", sideEffects: "Dizziness, back pain, stuffy nose. Rarely: high potassium levels.", tips: "Can be taken with or without food. Stay well hydrated. Avoid potassium supplements without guidance.", storage: "Store at room temperature." },
+};
+
+function getMedInfo(name: string) {
+  const lower = name.toLowerCase().trim();
+  // Try exact match first, then partial
+  if (MED_INFO[lower]) return MED_INFO[lower];
+  for (const key of Object.keys(MED_INFO)) {
+    if (lower.includes(key) || key.includes(lower)) return MED_INFO[key];
+  }
+  return null;
+}
+
 function MedDetail({ med, onClose }: { med: Medication; onClose: () => void }) {
-  const [activeTab, setActiveTab] = useState<"overview" | "history" | "info">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "history" | "info" | "interactions">("overview");
   const times: string[] = JSON.parse(med.schedule_times);
 
   const { data: doseHistory = [] } = useQuery<DoseLog[]>({
     queryKey: ["doses", "medication", med.id],
     queryFn: () => api.getDoseLogsForMed(med.id),
   });
+
+  // Load all meds for interaction checking (used in Interactions tab)
+  const { data: allMeds = [] } = useQuery<Medication[]>({
+    queryKey: ["medications"],
+    queryFn: () => api.getMedications(),
+  });
+  const otherActiveMeds = allMeds.filter(m => m.status === "active" && m.id !== med.id);
 
   const last30Days = Array.from({ length: 30 }, (_, i) => {
     const d = new Date();
@@ -2111,16 +2209,16 @@ function MedDetail({ med, onClose }: { med: Medication; onClose: () => void }) {
 
       {/* Tabs */}
       <div className="flex gap-1 bg-secondary rounded-xl p-1">
-        {(["overview", "history", "info"] as const).map(tab => (
+        {(["overview", "history", "info", "interactions"] as const).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
+            className={`flex-1 py-2 text-[11px] font-semibold rounded-lg transition-all ${
               activeTab === tab ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"
             }`}
             data-testid={`tab-${tab}`}
           >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab === "interactions" ? "Interact." : tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
       </div>
@@ -2212,16 +2310,140 @@ function MedDetail({ med, onClose }: { med: Medication; onClose: () => void }) {
         </div>
       )}
 
-      {activeTab === "info" && (
-        <div className="bg-card rounded-xl border border-border p-5 space-y-3">
-          <p className="text-sm text-muted-foreground leading-relaxed">
-            General information about {med.name} would appear here — common uses, typical dosing, storage instructions, and common side effects.
-          </p>
-          <p className="text-xs text-muted-foreground italic leading-relaxed">
-            Always consult your doctor or pharmacist for advice specific to your situation.
-          </p>
-        </div>
-      )}
+      {activeTab === "info" && (() => {
+        const info = getMedInfo(med.name);
+        return (
+          <div className="space-y-3">
+            {info ? (
+              <>
+                {([
+                  { label: "What it's used for", icon: "💊", text: info.uses },
+                  { label: "Common side effects", icon: "⚠️", text: info.sideEffects },
+                  { label: "Tips for taking it", icon: "✅", text: info.tips },
+                  { label: "Storage", icon: "🗄️", text: info.storage },
+                ] as const).map(({ label, icon, text }) => (
+                  <div key={label} className="bg-card rounded-2xl border border-border p-4 space-y-1.5">
+                    <p className="text-[11px] font-black uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+                      <span>{icon}</span> {label}
+                    </p>
+                    <p className="text-sm leading-relaxed text-foreground">{text}</p>
+                  </div>
+                ))}
+              </>
+            ) : (
+              <div className="bg-card rounded-2xl border border-border p-5">
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  We don't have detailed information about {med.name} yet. Ask your pharmacist for a full medication guide.
+                </p>
+              </div>
+            )}
+            {/* Disclaimer */}
+            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-2xl px-4 py-3">
+              <p className="text-xs text-amber-700 dark:text-amber-400 leading-relaxed font-medium">
+                This is general information only. It is not medical advice. Always consult your doctor or pharmacist before making any changes to your medications.
+              </p>
+            </div>
+          </div>
+        );
+      })()}
+
+      {activeTab === "interactions" && (() => {
+        const activeMeds = otherActiveMeds;
+
+        // Comprehensive interaction pairs database
+        type Severity = "danger" | "caution" | "safe";
+        interface InteractionRule {
+          drug1: string[];
+          drug2: string[];
+          severity: Severity;
+          reason: string;
+        }
+        const INTERACTION_RULES: InteractionRule[] = [
+          { drug1: ["warfarin"], drug2: ["ibuprofen","aspirin","naproxen"], severity: "danger", reason: "NSAIDs significantly increase bleeding risk with blood thinners like Warfarin. This combination is generally avoided without close medical supervision." },
+          { drug1: ["warfarin"], drug2: ["sertraline","fluoxetine","paroxetine"], severity: "danger", reason: "SSRIs increase the anticoagulant effect of Warfarin, significantly raising bleeding risk." },
+          { drug1: ["lisinopril","losartan"], drug2: ["ibuprofen","naproxen"], severity: "caution", reason: "NSAIDs can reduce the blood pressure-lowering effect of this medication and may affect kidney function. Short-term use is often OK — check with your doctor." },
+          { drug1: ["metformin"], drug2: ["alcohol"], severity: "caution", reason: "Heavy alcohol use with Metformin increases the rare but serious risk of lactic acidosis. Occasional moderate drinking is generally acceptable." },
+          { drug1: ["atorvastatin","simvastatin","rosuvastatin"], drug2: ["grapefruit"], severity: "caution", reason: "Grapefruit juice increases statin blood levels, which may increase the risk of muscle pain or liver issues." },
+          { drug1: ["levothyroxine"], drug2: ["calcium","iron","antacid"], severity: "caution", reason: "Calcium, iron, and antacids interfere with levothyroxine absorption. Take them at least 4 hours apart." },
+          { drug1: ["sertraline","fluoxetine"], drug2: ["tramadol"], severity: "danger", reason: "This combination can cause serotonin syndrome — a potentially serious condition causing agitation, rapid heart rate, and high blood pressure." },
+          { drug1: ["amlodipine","lisinopril","metoprolol"], drug2: ["lisinopril","amlodipine","metoprolol","losartan"], severity: "safe", reason: "This combination is commonly used together to manage blood pressure and is generally safe when monitored by a doctor." },
+        ];
+
+        const found: { other: Medication; severity: Severity; reason: string }[] = [];
+        const seen = new Set<string>();
+
+        for (const other of activeMeds) {
+          const thisLower = med.name.toLowerCase();
+          const otherLower = other.name.toLowerCase();
+          const key = [med.id, other.id].sort().join("-");
+          if (seen.has(key)) continue;
+          seen.add(key);
+
+          for (const rule of INTERACTION_RULES) {
+            const thisMatches = rule.drug1.some(d => thisLower.includes(d) || d.includes(thisLower.split(" ")[0]));
+            const otherMatches = rule.drug2.some(d => otherLower.includes(d) || d.includes(otherLower.split(" ")[0]));
+            const reversedThis = rule.drug2.some(d => thisLower.includes(d) || d.includes(thisLower.split(" ")[0]));
+            const reversedOther = rule.drug1.some(d => otherLower.includes(d) || d.includes(otherLower.split(" ")[0]));
+
+            if ((thisMatches && otherMatches) || (reversedThis && reversedOther)) {
+              found.push({ other, severity: rule.severity, reason: rule.reason });
+              break;
+            }
+          }
+        }
+
+        const severityConfig = {
+          danger:  { label: "Use with Caution", bg: "bg-destructive/10", border: "border-destructive/20", text: "text-destructive", dot: "bg-destructive", icon: "⚠️" },
+          caution: { label: "Moderate Interaction", bg: "bg-amber-50 dark:bg-amber-950/30", border: "border-amber-200 dark:border-amber-800", text: "text-amber-700 dark:text-amber-400", dot: "bg-amber-500", icon: "⚡" },
+          safe:    { label: "Generally Compatible", bg: "bg-green-50 dark:bg-green-950/30", border: "border-green-200 dark:border-green-800", text: "text-green-700 dark:text-green-400", dot: "bg-green-500", icon: "✓" },
+        };
+
+        return (
+          <div className="space-y-3">
+            <div className="bg-card rounded-2xl border border-border p-4">
+              <p className="text-sm font-semibold">Checking {med.name} against {activeMeds.length} other medication{activeMeds.length !== 1 ? "s" : ""}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Flagged combinations based on general guidelines</p>
+            </div>
+
+            {found.length === 0 && activeMeds.length > 0 && (
+              <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-2xl p-4 flex items-start gap-3">
+                <span className="text-lg">✅</span>
+                <div>
+                  <p className="text-sm font-bold text-green-700 dark:text-green-400">No known interactions found</p>
+                  <p className="text-xs text-green-600 dark:text-green-500 mt-0.5 leading-relaxed">No common interactions detected with your other medications. This doesn't mean there are none — always confirm with your pharmacist.</p>
+                </div>
+              </div>
+            )}
+
+            {found.length === 0 && activeMeds.length === 0 && (
+              <div className="bg-card rounded-2xl border border-border p-4">
+                <p className="text-sm text-muted-foreground">Add more medications to check for interactions between them.</p>
+              </div>
+            )}
+
+            {found.map(({ other, severity, reason }) => {
+              const cfg = severityConfig[severity];
+              return (
+                <div key={other.id} className={`${cfg.bg} ${cfg.border} border rounded-2xl p-4 space-y-2`}>
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${cfg.dot}`} />
+                    <p className={`text-[11px] font-black uppercase tracking-widest ${cfg.text}`}>{cfg.label}</p>
+                  </div>
+                  <p className="text-sm font-bold">{med.name} + {other.name}</p>
+                  <p className="text-sm leading-relaxed text-foreground/80">{reason}</p>
+                </div>
+              );
+            })}
+
+            {/* Disclaimer */}
+            <div className="bg-secondary rounded-2xl px-4 py-3">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                <span className="font-bold">This is not medical advice.</span> Interaction checks are for general awareness only. Always consult your doctor or pharmacist before starting, stopping, or changing any medication.
+              </p>
+            </div>
+          </div>
+        );
+      })()}
     </motion.div>
   );
 }
