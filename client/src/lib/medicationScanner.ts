@@ -1,11 +1,12 @@
 // ─── Medication Scanner ────────────────────────────────────────────────────────
-// Two-stage scanning pipeline:
-//   Stage 1: ZXing barcode scanner → reads UPC/EAN/QR from camera video stream
-//   Stage 2: NDC lookup via OpenFDA (free, no API key required)
-//   Fallback: Claude Vision AI via Supabase edge function
+// Full AI-powered medication identification pipeline:
+//   Stage 1: Claude Vision AI reads the label/bottle/pill image
+//   Stage 2: Cross-references with OpenFDA (drug labels + NDC directory)
+//   Stage 3: Cross-references with RxNorm (NIH normalized drug data)
+//   Stage 4: Cross-references with DailyMed (NIH official labels)
 //
-// Works for ANY US medication or supplement with a barcode.
-// 100% open-source APIs for Stage 1+2 — no cost, no key required.
+// Works for ANY medication: OTC, prescription, supplements, vitamins, herbal.
+// Returns comprehensive structured data from 4 authoritative sources.
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -18,6 +19,24 @@ export interface ScanResult {
   form?: string;
   confidence: "high" | "medium" | "low";
   source: "barcode" | "ai" | "manual";
+
+  // Rich fields from the new pipeline
+  manufacturer?: string;
+  ndc_number?: string;
+  lot_number?: string;
+  expiration_date?: string;
+  quantity?: string;
+  rx_or_otc?: string;
+  drug_schedule?: string;
+  active_ingredients?: Array<{ name: string; strength?: string }>;
+  directions?: string;
+  warnings_visible?: string;
+  description?: string;
+
+  // Cross-referenced database data
+  fda_data?: any;
+  rxnorm_data?: any;
+  dailymed_data?: any;
 }
 
 export interface ScanError {
@@ -53,8 +72,6 @@ function barcodeToCandidateNDCs(barcode: string): string[] {
     const inner = digits.slice(0, 11); // drop check digit
 
     // The 10 "NDC digits" are positions 1-10 of UPC-A (after leading 0)
-    // Encoding variants (labeler-product-package):
-    // Format 4-4-2: llll-pppp-cc
     const d = inner.startsWith("0") ? inner.slice(1) : inner;
 
     if (d.length === 10) {
@@ -158,6 +175,9 @@ async function lookupNDCinOpenFDA(ndc: string): Promise<ScanResult | null> {
       form: normalizedForm,
       confidence: "high",
       source: "barcode",
+      manufacturer: item.labeler_name || undefined,
+      ndc_number: ndc,
+      active_ingredients: ingredients,
     };
   } catch {
     return null;
@@ -187,7 +207,7 @@ export async function lookupBarcodeInDrugDB(
   return null;
 }
 
-// ─── AI Vision Fallback ───────────────────────────────────────────────────────
+// ─── AI Vision Scanner ───────────────────────────────────────────────────────
 
 const SUPABASE_URL =
   (import.meta as any).env?.VITE_SUPABASE_URL ||
@@ -197,8 +217,9 @@ const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFwbWpnaG9jYWp5dnVnanhua2RuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1ODM4MDQsImV4cCI6MjA5MDE1OTgwNH0.fzHBvHic5W6BZVUfD-dXEj0x6MaBeM6GyGEUsu8vQt0";
 
 /**
- * Fallback: send a captured frame to Claude Vision via Supabase edge function.
- * Used when barcode scan produces no result (e.g. supplement, foreign drug, no barcode).
+ * Send a captured photo to the AI medication scanner.
+ * The edge function runs the full pipeline: Claude Vision → OpenFDA → RxNorm → DailyMed.
+ * Returns comprehensive scan results or null on failure.
  */
 export async function scanWithAIVision(
   imageDataUrl: string
@@ -212,7 +233,7 @@ export async function scanWithAIVision(
         apikey: SUPABASE_ANON_KEY,
       },
       body: JSON.stringify({ image: imageDataUrl }),
-      signal: AbortSignal.timeout(35000),
+      signal: AbortSignal.timeout(50000),
     });
 
     if (!res.ok) return null;
@@ -223,11 +244,30 @@ export async function scanWithAIVision(
     return {
       name: data.name,
       brand: data.brand || undefined,
+      genericName: data.genericName || undefined,
       strength: data.strength || undefined,
       unit: data.unit || "mg",
       form: data.form || "Tablet",
       confidence: data.confidence || "medium",
       source: "ai",
+
+      // Rich fields
+      manufacturer: data.manufacturer || undefined,
+      ndc_number: data.ndc_number || undefined,
+      lot_number: data.lot_number || undefined,
+      expiration_date: data.expiration_date || undefined,
+      quantity: data.quantity || undefined,
+      rx_or_otc: data.rx_or_otc || undefined,
+      drug_schedule: data.drug_schedule || undefined,
+      active_ingredients: data.active_ingredients || [],
+      directions: data.directions || undefined,
+      warnings_visible: data.warnings_visible || undefined,
+      description: data.description || undefined,
+
+      // Database cross-references
+      fda_data: data.fda_data || undefined,
+      rxnorm_data: data.rxnorm_data || undefined,
+      dailymed_data: data.dailymed_data || undefined,
     };
   } catch {
     return null;

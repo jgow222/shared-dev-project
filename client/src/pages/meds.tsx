@@ -381,11 +381,14 @@ const SCAN_URL = (() => {
 const SCAN_KEY = (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_SUPABASE_ANON_KEY)
   || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFwbWpnaG9jYWp5dnVnanhua2RuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1ODM4MDQsImV4cCI6MjA5MDE1OTgwNH0.fzHBvHic5W6BZVUfD-dXEj0x6MaBeM6GyGEUsu8vQt0";
 
-// ── AI call — dead simple, no wrapper layers ──────────────────────────────────
+// ── AI call — hits the full MedScan pipeline (Vision + FDA + RxNorm + DailyMed) ──
 
 async function callScanAI(dataUrl: string): Promise<{
-  name?: string; brand?: string; strength?: string; unit?: string;
+  name?: string; brand?: string; genericName?: string; strength?: string; unit?: string;
   form?: string; confidence?: string; raw_text?: string; error?: string;
+  manufacturer?: string; ndc_number?: string; rx_or_otc?: string;
+  active_ingredients?: Array<{ name: string; strength?: string }>;
+  directions?: string; fda_data?: any; rxnorm_data?: any; dailymed_data?: any;
 }> {
   const ctrl = new AbortController();
   // 45 second timeout — enough for cold starts
@@ -500,7 +503,10 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
   const [stage,      setStageState]  = useState<ScanStage>("starting");
   const [errorMsg,   setErrorMsg]    = useState("");
   const [scanResult, setScanResult]  = useState<{
-    name: string; brand?: string; strength?: string; unit?: string; form?: string; confidence?: string;
+    name: string; brand?: string; genericName?: string; strength?: string; unit?: string; form?: string; confidence?: string;
+    manufacturer?: string; ndc_number?: string; rx_or_otc?: string; fda_verified?: boolean;
+    active_ingredients?: Array<{ name: string; strength?: string }>;
+    directions?: string; dailymed_url?: string;
   } | null>(null);
   const [photoSrc,   setPhotoSrc]    = useState("");   // preview data URL
   const [manualText, setManualText]  = useState("");
@@ -615,10 +621,18 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
       setScanResult({
         name: data.name!,
         brand:      data.brand      || undefined,
+        genericName: data.genericName || undefined,
         strength:   data.strength   || undefined,
         unit:       data.unit       || undefined,
         form:       data.form       || undefined,
         confidence: data.confidence || "medium",
+        manufacturer: data.manufacturer || undefined,
+        ndc_number: data.ndc_number || undefined,
+        rx_or_otc: data.rx_or_otc || undefined,
+        fda_verified: !!(data.fda_data || data.rxnorm_data),
+        active_ingredients: data.active_ingredients || undefined,
+        directions: data.directions || undefined,
+        dailymed_url: data.dailymed_data?.dailymed_url || undefined,
       });
       setStage("result");
       setErrorMsg("");
@@ -892,7 +906,7 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
           </div>
           <div className="bg-black/80 backdrop-blur rounded-2xl px-8 py-4 text-center">
             <p className="text-white font-bold text-base">Identifying medication…</p>
-            <p className="text-white/50 text-xs mt-1">AI is reading the label</p>
+            <p className="text-white/50 text-xs mt-1">AI Vision + FDA + RxNorm + DailyMed</p>
           </div>
         </div>
       )}
@@ -938,9 +952,17 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
                   <p className="text-white/50 text-[10px] font-black uppercase tracking-widest">
                     {scanResult.confidence === "high" ? "Identified" : "Best match"} · {scanResult.confidence} confidence
                   </p>
+                  {scanResult.fda_verified && (
+                    <span className="ml-auto bg-green-500/20 text-green-300 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border border-green-400/30">
+                      FDA Verified
+                    </span>
+                  )}
                 </div>
                 <p className="text-white text-2xl font-bold leading-tight">{scanResult.name}</p>
-                {scanResult.brand && scanResult.brand.toLowerCase() !== scanResult.name.toLowerCase() && (
+                {scanResult.genericName && scanResult.genericName.toLowerCase() !== scanResult.name.toLowerCase() && (
+                  <p className="text-white/50 text-xs">{scanResult.genericName}</p>
+                )}
+                {scanResult.brand && scanResult.brand.toLowerCase() !== scanResult.name.toLowerCase() && scanResult.brand.toLowerCase() !== scanResult.genericName?.toLowerCase() && (
                   <p className="text-white/60 text-sm font-medium">{scanResult.brand}</p>
                 )}
                 {(scanResult.strength || scanResult.form) && (
@@ -948,8 +970,12 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
                     {[
                       scanResult.strength ? `${scanResult.strength} ${scanResult.unit ?? "mg"}` : null,
                       scanResult.form,
+                      scanResult.rx_or_otc,
                     ].filter(Boolean).join("  ·  ")}
                   </p>
+                )}
+                {scanResult.manufacturer && (
+                  <p className="text-white/40 text-xs">by {scanResult.manufacturer}</p>
                 )}
               </motion.div>
             )}

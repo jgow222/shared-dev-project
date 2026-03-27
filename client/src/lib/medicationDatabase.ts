@@ -745,24 +745,14 @@ async function searchOpenFDA(query: string, limit = 15): Promise<MedEntry[]> {
 
   try {
     const q = encodeURIComponent(query.trim());
-    // Use wildcard suffix search — matches NyQuil, NyQuil Severe, NyQuil Kids, etc.
-    const url = `https://api.fda.gov/drug/label.json?search=openfda.brand_name:${q}*&limit=${limit}`;
+    // Use proper OR syntax: (brand_name:X*)+OR+(generic_name:X*)
+    const url = `https://api.fda.gov/drug/label.json?search=(openfda.brand_name:${q}*)+OR+(openfda.generic_name:${q}*)&limit=${limit}`;
     const res = await fetch(url, {
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(5000),
     });
 
-    if (!res.ok) {
-      // Fallback: try generic name search too
-      const url2 = `https://api.fda.gov/drug/label.json?search=openfda.generic_name:${q}*&limit=${limit}`;
-      const res2 = await fetch(url2, {
-        headers: { Accept: "application/json" },
-        signal: AbortSignal.timeout(5000),
-      });
-      if (!res2.ok) return [];
-      const data2 = await res2.json();
-      return parseOpenFDAResults(data2);
-    }
+    if (!res.ok) return [];
 
     const data = await res.json();
     return parseOpenFDAResults(data);
