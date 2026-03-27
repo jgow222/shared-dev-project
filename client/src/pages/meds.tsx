@@ -2,6 +2,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import * as api from "@/lib/api";
 import { useState, useRef, useEffect, useCallback } from "react";
+
 import { motion, AnimatePresence } from "framer-motion";
 import type { Medication, DoseLog } from "@shared/schema";
 import { searchMedications, getMedByName, searchMedicationsWithFallback } from "@/lib/medicationDatabase";
@@ -1914,14 +1915,8 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
 
 // ─── MedCard ─────────────────────────────────────────────────────────────────
 
-function MedCard({ med, onEdit, onDetail }: { med: Medication; onEdit: () => void; onDetail: () => void }) {
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+function MedCard({ med, onEdit, onDetail, onRequestDelete }: { med: Medication; onEdit: () => void; onDetail: () => void; onRequestDelete: () => void }) {
   const refillBadge = getRefillBadge(med.pill_count);
-
-  const deleteMed = useMutation({
-    mutationFn: async () => { await api.deleteMedication(med.id); },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["medications"] }); },
-  });
 
   const times: string[] = JSON.parse(med.schedule_times);
 
@@ -2003,64 +1998,13 @@ function MedCard({ med, onEdit, onDetail }: { med: Medication; onEdit: () => voi
         <div className="w-px bg-border" />
         <motion.button
           whileTap={{ scale: 0.92 }}
-          onClick={() => setShowDeleteConfirm(true)}
+          onClick={onRequestDelete}
           className="bg-transparent text-destructive h-10 flex-1 text-sm font-semibold flex items-center justify-center gap-1.5"
           data-testid={`delete-med-${med.id}`}
         >
           <TrashIcon size={12} /> Remove
         </motion.button>
       </div>
-
-      {/* Delete confirmation bottom sheet */}
-      <AnimatePresence>
-        {showDeleteConfirm && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-40 bg-black/50"
-              onClick={() => setShowDeleteConfirm(false)}
-            />
-            <motion.div
-              initial={{ opacity: 0, y: 60 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 60 }}
-              transition={{ type: "spring", damping: 28, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 z-50 bg-card rounded-t-3xl p-6 pb-8 space-y-4"
-            >
-              <div className="w-10 h-1 bg-border rounded-full mx-auto" />
-              <div className="flex items-start gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-destructive/10 flex items-center justify-center flex-shrink-0">
-                  <TrashIcon size={20} />
-                </div>
-                <div>
-                  <p className="font-bold text-base">Remove {med.name}?</p>
-                  <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
-                    This will remove the medication and all its dose history. This cannot be undone.
-                  </p>
-                </div>
-              </div>
-              <motion.button
-                whileTap={{ scale: 0.97 }}
-                onClick={() => { deleteMed.mutate(); setShowDeleteConfirm(false); }}
-                disabled={deleteMed.isPending}
-                className="w-full h-14 rounded-2xl bg-destructive text-white font-bold text-base"
-                data-testid={`confirm-delete-${med.id}`}
-              >
-                {deleteMed.isPending ? "Removing…" : "Yes, Remove"}
-              </motion.button>
-              <motion.button
-                whileTap={{ scale: 0.97 }}
-                onClick={() => setShowDeleteConfirm(false)}
-                className="w-full h-12 rounded-2xl bg-secondary text-foreground font-semibold text-sm"
-              >
-                Keep It
-              </motion.button>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
     </motion.div>
   );
 }
@@ -2426,6 +2370,16 @@ function MedDetail({ med, onClose }: { med: Medication; onClose: () => void }) {
 export default function MedsPage() {
   const [view, setView] = useState<"list" | "add" | "edit" | "detail">("list");
   const [selectedMed, setSelectedMed] = useState<Medication | null>(null);
+  // Delete confirmation lives here so the sheet renders outside MedCard's overflow:hidden
+  const [medToDelete, setMedToDelete] = useState<Medication | null>(null);
+
+  const deleteMedMutation = useMutation({
+    mutationFn: async (id: number) => { await api.deleteMedication(id); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["medications"] });
+      setMedToDelete(null);
+    },
+  });
 
   const { data: meds = [], isLoading } = useQuery<Medication[]>({
     queryKey: ["medications"],
@@ -2500,6 +2454,7 @@ export default function MedsPage() {
                     med={med}
                     onEdit={() => { setSelectedMed(med); setView("edit"); }}
                     onDetail={() => { setSelectedMed(med); setView("detail"); }}
+                    onRequestDelete={() => setMedToDelete(med)}
                   />
                 ))}
               </div>
@@ -2518,6 +2473,7 @@ export default function MedsPage() {
                     med={med}
                     onEdit={() => { setSelectedMed(med); setView("edit"); }}
                     onDetail={() => { setSelectedMed(med); setView("detail"); }}
+                    onRequestDelete={() => setMedToDelete(med)}
                   />
                 ))}
               </div>
@@ -2536,6 +2492,7 @@ export default function MedsPage() {
                     med={med}
                     onEdit={() => { setSelectedMed(med); setView("edit"); }}
                     onDetail={() => { setSelectedMed(med); setView("detail"); }}
+                    onRequestDelete={() => setMedToDelete(med)}
                   />
                 ))}
               </div>
@@ -2571,6 +2528,62 @@ export default function MedsPage() {
           )}
         </>
       )}
+
+      {/* ── Delete confirmation sheet — rendered at page level, above nav ── */}
+      <AnimatePresence>
+        {medToDelete && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[60] bg-black/50"
+              onClick={() => setMedToDelete(null)}
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 80 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 80 }}
+              transition={{ type: "spring", damping: 30, stiffness: 320 }}
+              className="fixed bottom-0 left-0 right-0 z-[70] bg-card rounded-t-3xl pt-5 px-5 pb-[88px] space-y-3"
+            >
+              {/* Pull bar */}
+              <div className="w-10 h-1 bg-border rounded-full mx-auto mb-2" />
+              {/* Icon + title */}
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-destructive/10 flex items-center justify-center flex-shrink-0">
+                  <TrashIcon size={22} />
+                </div>
+                <div className="flex-1">
+                  <p className="font-bold text-base leading-snug">Remove {medToDelete.name}?</p>
+                  <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
+                    This removes the medication and all its dose history. This cannot be undone.
+                  </p>
+                </div>
+              </div>
+              {/* Confirm */}
+              <motion.button
+                whileTap={{ scale: 0.97 }}
+                onClick={() => deleteMedMutation.mutate(medToDelete.id)}
+                disabled={deleteMedMutation.isPending}
+                className="w-full h-14 rounded-2xl bg-destructive text-white font-bold text-base disabled:opacity-50"
+                data-testid={`confirm-delete-${medToDelete.id}`}
+              >
+                {deleteMedMutation.isPending ? "Removing…" : "Yes, Remove"}
+              </motion.button>
+              {/* Cancel */}
+              <motion.button
+                whileTap={{ scale: 0.97 }}
+                onClick={() => setMedToDelete(null)}
+                className="w-full h-12 rounded-2xl bg-secondary text-foreground font-semibold text-sm"
+                data-testid="cancel-delete-btn"
+              >
+                Keep It
+              </motion.button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
