@@ -1129,9 +1129,10 @@ interface MedSearchProps {
   onChange: (name: string) => void;
   onSelect: (entry: MedEntry) => void;
   onOpenCamera: () => void;
+  onConfirm?: () => void; // called when user presses Enter to confirm a typed name
 }
 
-function MedSearchInput({ value, onChange, onSelect, onOpenCamera }: MedSearchProps) {
+function MedSearchInput({ value, onChange, onSelect, onOpenCamera, onConfirm }: MedSearchProps) {
   const [results, setResults] = useState<MedEntry[]>([]);
   const [open, setOpen] = useState(false);
   const [searching, setSearching] = useState(false);
@@ -1204,6 +1205,12 @@ function MedSearchInput({ value, onChange, onSelect, onOpenCamera }: MedSearchPr
           autoComplete="off"
           autoCapitalize="words"
           onFocus={() => value.trim() && setOpen(true)}
+          onKeyDown={e => {
+            if (e.key === "Enter" && value.trim()) {
+              setOpen(false);
+              onConfirm?.();
+            }
+          }}
         />
         {/* Camera button inside input */}
         <motion.button
@@ -1267,12 +1274,25 @@ function MedSearchInput({ value, onChange, onSelect, onOpenCamera }: MedSearchPr
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Confirm typed name — appears when user has typed something but not selected from dropdown */}
+      {value.trim().length >= 2 && !open && onConfirm && (
+        <motion.button
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          whileTap={{ scale: 0.97 }}
+          onClick={onConfirm}
+          className="w-full h-12 rounded-2xl bg-secondary border border-border text-foreground text-sm font-semibold flex items-center justify-center gap-2"
+          data-testid="confirm-name-btn"
+          type="button"
+        >
+          <CheckIcon size={15} />
+          Use "{value.trim()}" as medication name
+        </motion.button>
+      )}
     </div>
   );
 }
-
-// ─── MedForm — Single-Screen Form ─────────────────────────────────────────────
-
 
 // ─── MedForm — redesigned for all ages ────────────────────────────────────────
 // Clean, visual, works for 8-year-olds and 80-year-olds.
@@ -1354,6 +1374,9 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
   const isEdit = !!med;
   const [showCamera, setShowCamera] = useState(false);
   const [showDetails, setShowDetails] = useState(isEdit);
+  // nameConfirmed: true once user picks from dropdown, camera, or presses Enter
+  // prevents the full form from opening on every keystroke
+  const [nameConfirmed, setNameConfirmed] = useState(isEdit);
 
   // Fields
   const [name, setName]               = useState(med?.name || "");
@@ -1428,6 +1451,7 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
     setDoseStrength(entry.strength);
     setDoseUnit(entry.unit);
     setForm(entry.form);
+    setNameConfirmed(true);
   };
 
   const handleCameraResult = (result: Partial<{ name: string; strength: string; unit: string; form: string }>) => {
@@ -1436,6 +1460,7 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
     if (result.unit) setDoseUnit(result.unit);
     if (result.form) setForm(result.form);
     setShowCamera(false);
+    setNameConfirmed(true);
   };
 
   const inputClass = "w-full h-14 px-4 rounded-2xl border border-border bg-card text-foreground text-base focus:outline-none focus:ring-2 focus:ring-primary transition-shadow";
@@ -1500,12 +1525,14 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
       )}
 
       {/* ── Name field ── */}
-      {!name ? (
+      {/* Search input stays visible until a name is confirmed */}
+      {!nameConfirmed ? (
         <MedSearchInput
           value={name}
-          onChange={setName}
+          onChange={v => { setName(v); setNameConfirmed(false); }}
           onSelect={handleSelectFromDB}
           onOpenCamera={() => setShowCamera(true)}
+          onConfirm={() => { if (name.trim()) setNameConfirmed(true); }}
         />
       ) : (
         <div className="flex items-center gap-2">
@@ -1522,7 +1549,7 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
           </div>
           <motion.button
             whileTap={{ scale: 0.92 }}
-            onClick={() => { setName(""); setDoseStrength(""); }}
+            onClick={() => { setName(""); setDoseStrength(""); setNameConfirmed(false); }}
             className="w-11 h-11 rounded-xl bg-secondary flex items-center justify-center text-muted-foreground flex-shrink-0"
             data-testid="clear-name-btn"
           >
@@ -1549,9 +1576,9 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
         )}
       </AnimatePresence>
 
-      {/* ── All fields — visible once name is set ── */}
+      {/* ── All fields — visible once name is confirmed ── */}
       <AnimatePresence>
-        {name.trim() && (
+        {nameConfirmed && name.trim() && (
           <motion.div
             key="fields"
             initial={{ opacity: 0, y: 10 }}
@@ -1581,7 +1608,7 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
                     key={u}
                     whileTap={{ scale: 0.92 }}
                     onClick={() => setDoseUnit(u)}
-                    className={`h-12 rounded-xl text-sm font-bold transition-colors ${
+                    className={`h-14 rounded-xl text-sm font-bold transition-colors ${
                       doseUnit === u
                         ? "bg-primary text-primary-foreground shadow-sm"
                         : "bg-card border border-border text-muted-foreground"
@@ -1607,21 +1634,21 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
                     whileTap={{ scale: 0.92 }}
                     onClick={() => {
                       setDosesPerDay(n);
-                      // Sync times to match
                       const count = parseInt(n);
                       const defaults = ["08:00", "12:00", "18:00", "21:00"];
                       const curr = times.slice(0, count);
                       const needed = count - curr.length;
                       setTimes([...curr, ...defaults.slice(curr.length, curr.length + needed)]);
                     }}
-                    className={`h-14 rounded-xl text-xl font-black transition-colors ${
+                    className={`h-16 rounded-xl text-2xl font-black transition-colors flex flex-col items-center justify-center gap-0.5 ${
                       dosesPerDay === n
                         ? "bg-primary text-primary-foreground shadow-sm"
                         : "bg-card border border-border text-foreground"
                     }`}
                     data-testid={`doses-per-day-${n}`}
                   >
-                    {n}
+                    <span>{n}</span>
+                    <span className="text-[9px] font-semibold opacity-60">{n === "1" ? "once" : n === "2" ? "twice" : `${n}×`}</span>
                   </motion.button>
                 ))}
               </div>
@@ -1658,21 +1685,21 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
               <label className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">
                 Type
               </label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-3 gap-2.5">
                 {FORM_OPTIONS.map(f => (
                   <motion.button
                     key={f}
                     whileTap={{ scale: 0.92 }}
                     onClick={() => setForm(f)}
-                    className={`h-[72px] rounded-2xl transition-colors border flex flex-col items-center justify-center gap-2 ${
+                    className={`h-20 rounded-2xl transition-colors border flex flex-col items-center justify-center gap-2 px-1 ${
                       form === f
                         ? "bg-primary text-primary-foreground border-primary shadow-sm"
                         : "bg-card border-border text-muted-foreground"
                     }`}
                     data-testid={`form-${f}`}
                   >
-                    <FormIcon name={f} size={24} />
-                    <span className="text-[11px] font-bold leading-none">{f}</span>
+                    <FormIcon name={f} size={26} />
+                    <span className="text-[11px] font-bold leading-none text-center">{f}</span>
                   </motion.button>
                 ))}
               </div>
@@ -1683,13 +1710,13 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
               <label className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">
                 Frequency
               </label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2.5">
                 {FREQUENCY_OPTIONS.map(opt => (
                   <motion.button
                     key={opt.label}
                     whileTap={{ scale: 0.92 }}
                     onClick={() => handleFrequencySelect(opt)}
-                    className={`h-[72px] rounded-2xl transition-colors border flex items-center gap-3 px-4 ${
+                    className={`h-20 rounded-2xl transition-colors border flex items-center gap-3 px-4 ${
                       frequency === opt.label
                         ? "bg-primary text-primary-foreground border-primary shadow-sm"
                         : "bg-card border-border text-foreground"
