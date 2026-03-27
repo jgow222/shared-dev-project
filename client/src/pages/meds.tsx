@@ -1273,24 +1273,102 @@ function MedSearchInput({ value, onChange, onSelect, onOpenCamera }: MedSearchPr
 
 // ─── MedForm — Single-Screen Form ─────────────────────────────────────────────
 
+
+// ─── MedForm — redesigned for all ages ────────────────────────────────────────
+// Clean, visual, works for 8-year-olds and 80-year-olds.
+// Big tap targets. Icons next to text. No hidden steps.
+
+// Form icons with label — maps form name to existing SVG components
+function FormIcon({ name, size = 26 }: { name: string; size?: number }) {
+  switch (name) {
+    case "Tablet":   return <PillTabletIcon size={size} />;
+    case "Capsule":  return <PillCapsuleIcon size={size} />;
+    case "Liquid":   return <PillLiquidIcon size={size} />;
+    case "Inhaler":  return <PillInhalerIcon size={size} />;
+    case "Patch":    return <PillPatchIcon size={size} />;
+    case "Drops":    return <PillDropsIcon size={size} />;
+    case "Injection": return <PillInjectionIcon size={size} />;
+    case "Softgel":
+      return (
+        <svg width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round">
+          <ellipse cx="14" cy="14" rx="7" ry="10" />
+        </svg>
+      );
+    case "Cream":
+      return (
+        <svg width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round">
+          <path d="M6 20 Q14 10 22 20" />
+          <rect x="6" y="20" width="16" height="4" rx="2" />
+          <path d="M14 20 v-8" />
+        </svg>
+      );
+    case "Gummy":
+      return (
+        <svg width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round">
+          <path d="M9 22 C9 22 7 16 7 12 a7 7 0 0 1 14 0 c0 4 -2 10 -2 10 H9z" />
+          <line x1="9" y1="18" x2="19" y2="18" />
+        </svg>
+      );
+    default:
+      return (
+        <svg width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round">
+          <circle cx="14" cy="14" r="8" />
+          <line x1="14" y1="10" x2="14" y2="14" />
+          <circle cx="14" cy="18" r="1" fill="currentColor" />
+        </svg>
+      );
+  }
+}
+
+// Frequency icons
+function FreqIcon({ label }: { label: string }) {
+  if (label === "Once daily") return (
+    <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round">
+      <circle cx="11" cy="11" r="8" />
+      <path d="M11 7v4l2.5 2.5" />
+    </svg>
+  );
+  if (label === "Twice daily") return (
+    <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round">
+      <circle cx="7" cy="11" r="5" />
+      <circle cx="15" cy="11" r="5" />
+    </svg>
+  );
+  if (label === "3× daily") return (
+    <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round">
+      <circle cx="4" cy="11" r="3" />
+      <circle cx="11" cy="11" r="3" />
+      <circle cx="18" cy="11" r="3" />
+    </svg>
+  );
+  // As needed
+  return (
+    <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round">
+      <path d="M11 4v4M11 14v4M4 11h4M14 11h4" />
+      <circle cx="11" cy="11" r="2.5" />
+    </svg>
+  );
+}
+
 function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
   const isEdit = !!med;
   const [showCamera, setShowCamera] = useState(false);
   const [showDetails, setShowDetails] = useState(isEdit);
 
   // Fields
-  const [name, setName] = useState(med?.name || "");
+  const [name, setName]               = useState(med?.name || "");
   const [doseStrength, setDoseStrength] = useState(med?.dose_strength || "");
-  const [doseUnit, setDoseUnit] = useState(med?.dose_unit || "mg");
-  const [form, setForm] = useState(med?.form || "Tablet");
-  const [frequency, setFrequency] = useState(med?.frequency || "Once daily");
-  const [times, setTimes] = useState<string[]>(
+  const [doseUnit, setDoseUnit]       = useState(med?.dose_unit || "mg");
+  const [dosesPerDay, setDosesPerDay] = useState<string>("1"); // customizable amount per day
+  const [form, setForm]               = useState(med?.form || "Tablet");
+  const [frequency, setFrequency]     = useState(med?.frequency || "Once daily");
+  const [times, setTimes]             = useState<string[]>(
     med ? JSON.parse(med.schedule_times) : ["08:00"]
   );
-  const [purpose, setPurpose] = useState(med?.purpose || "");
-  const [doctor, setDoctor] = useState(med?.doctor || "");
-  const [pharmacy, setPharmacy] = useState(med?.pharmacy || "");
-  const [pillCount, setPillCount] = useState<string>(med?.pill_count?.toString() || "");
+  const [purpose, setPurpose]         = useState(med?.purpose || "");
+  const [doctor, setDoctor]           = useState(med?.doctor || "");
+  const [pharmacy, setPharmacy]       = useState(med?.pharmacy || "");
+  const [pillCount, setPillCount]     = useState<string>(med?.pill_count?.toString() || "");
   const [interactionWarning, setInteractionWarning] = useState<{ severity: string; message: string } | null>(null);
 
   const canSave = name.trim().length > 0;
@@ -1313,14 +1391,12 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
         is_critical: med?.is_critical || 0,
         created_at: med?.created_at || new Date().toISOString().split("T")[0],
       };
-
       if (isEdit) {
         await api.updateMedication(med!.id, payload);
       } else {
         const interactionData = await api.checkInteractions(name);
         if (interactionData.interactions?.length > 0) {
-          const worst = interactionData.interactions[0];
-          setInteractionWarning(worst);
+          setInteractionWarning(interactionData.interactions[0]);
         }
         await api.createMedication(payload as any);
       }
@@ -1333,14 +1409,16 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
     },
   });
 
-  const handleFrequencySelect = (freq: (typeof FREQUENCY_OPTIONS)[0]) => {
-    setFrequency(freq.label);
-    if (freq.times === 0) {
+  const handleFrequencySelect = (opt: typeof FREQUENCY_OPTIONS[0]) => {
+    setFrequency(opt.label);
+    if (opt.times === 0) {
       setTimes([]);
+      setDosesPerDay("0");
     } else {
-      const defaults = ["08:00", "20:00", "13:00", "06:00"];
-      const current = times.slice(0, freq.times);
-      const needed = freq.times - current.length;
+      setDosesPerDay(String(opt.times));
+      const defaults = ["08:00", "12:00", "18:00", "21:00", "06:00", "10:00", "14:00", "22:00"];
+      const current = times.slice(0, opt.times);
+      const needed = opt.times - current.length;
       setTimes([...current, ...defaults.slice(current.length, current.length + needed)]);
     }
   };
@@ -1376,7 +1454,7 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 20 }}
-      className="space-y-5 pb-8"
+      className="space-y-5 pb-10"
     >
       {/* Header */}
       <div className="flex items-center gap-3">
@@ -1388,25 +1466,40 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
         >
           <XIcon size={18} />
         </motion.button>
-        <h2 className="text-lg font-bold tracking-tight leading-snug">
+        <h2 className="text-lg font-bold tracking-tight">
           {isEdit ? "Edit Medication" : "Add Medication"}
         </h2>
       </div>
 
-      {/* Scan Label button (add mode only) */}
+      {/* ── Scan Label — big, prominent, first thing seen ── */}
       {!isEdit && (
         <motion.button
-          whileTap={{ scale: 0.92 }}
+          whileTap={{ scale: 0.97 }}
           onClick={() => setShowCamera(true)}
-          className="w-full h-14 bg-primary text-primary-foreground rounded-2xl font-bold text-base flex items-center justify-center gap-3 shadow-sm"
+          className="w-full h-[72px] bg-primary text-primary-foreground rounded-2xl font-bold text-base flex items-center gap-4 px-5 shadow-md"
           data-testid="scan-label-card"
         >
-          <CameraIcon size={22} />
-          Scan Label
+          <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+            <CameraIcon size={22} />
+          </div>
+          <div className="text-left flex-1">
+            <p className="font-bold text-base leading-tight">Scan Label</p>
+            <p className="text-xs text-primary-foreground/70 font-normal mt-0.5">Take a photo of any bottle or label</p>
+          </div>
+          <ChevronRightIcon size={16} />
         </motion.button>
       )}
 
-      {/* Search / type input */}
+      {/* Divider */}
+      {!isEdit && (
+        <div className="flex items-center gap-3">
+          <div className="flex-1 h-px bg-border" />
+          <span className="text-xs text-muted-foreground font-semibold uppercase tracking-widest">or type name</span>
+          <div className="flex-1 h-px bg-border" />
+        </div>
+      )}
+
+      {/* ── Name field ── */}
       {!name ? (
         <MedSearchInput
           value={name}
@@ -1415,19 +1508,22 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
           onOpenCamera={() => setShowCamera(true)}
         />
       ) : (
-        /* Name pill/chip */
         <div className="flex items-center gap-2">
-          <div className="flex-1 flex items-center gap-2 bg-primary/10 border border-primary/20 rounded-xl px-4 py-3">
-            <CheckIcon size={16} />
-            <span className="text-sm font-bold text-foreground truncate">{name}</span>
-            {doseStrength && (
-              <span className="text-xs text-muted-foreground ml-1">{doseStrength} {doseUnit}</span>
-            )}
+          <div className="flex-1 flex items-center gap-3 bg-primary/10 border border-primary/20 rounded-2xl px-4 py-3.5 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-primary/20 flex items-center justify-center flex-shrink-0 text-primary">
+              <CheckIcon size={16} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-foreground truncate">{name}</p>
+              {doseStrength && (
+                <p className="text-xs text-muted-foreground">{doseStrength} {doseUnit} · {form}</p>
+              )}
+            </div>
           </div>
           <motion.button
             whileTap={{ scale: 0.92 }}
             onClick={() => { setName(""); setDoseStrength(""); }}
-            className="w-10 h-10 rounded-xl bg-secondary flex items-center justify-center text-muted-foreground flex-shrink-0"
+            className="w-11 h-11 rounded-xl bg-secondary flex items-center justify-center text-muted-foreground flex-shrink-0"
             data-testid="clear-name-btn"
           >
             <XIcon size={16} />
@@ -1442,137 +1538,198 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className={`rounded-2xl p-4 flex items-start gap-3 ${
-              interactionWarning.severity === "severe"
-                ? "bg-destructive/10 border border-destructive/20"
-                : "bg-[hsl(var(--nurilo-alert-amber))]/10 border border-[hsl(var(--nurilo-alert-amber))]/20"
-            }`}
-            data-testid="interaction-warning"
+            className="rounded-2xl p-4 flex items-start gap-3 bg-[hsl(var(--nurilo-alert-amber))]/10 border border-[hsl(var(--nurilo-alert-amber))]/20"
           >
-            <WarnIcon size={18} className={
-              interactionWarning.severity === "severe" ? "text-destructive mt-0.5" : "text-[hsl(var(--nurilo-alert-amber))] mt-0.5"
-            } />
+            <WarnIcon size={18} className="text-[hsl(var(--nurilo-alert-amber))] mt-0.5 flex-shrink-0" />
             <div>
-              <p className="text-sm font-bold">
-                {interactionWarning.severity === "severe" ? "Severe Interaction" : "Moderate Interaction"}
-              </p>
+              <p className="text-sm font-bold">Interaction Notice</p>
               <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{interactionWarning.message}</p>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── Remaining fields (visible once name is set) ───────────────────────── */}
+      {/* ── All fields — visible once name is set ── */}
       <AnimatePresence>
         {name.trim() && (
           <motion.div
             key="fields"
-            initial={{ opacity: 0, y: 12 }}
+            initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 12 }}
-            className="space-y-5"
+            exit={{ opacity: 0 }}
+            className="space-y-6"
           >
-            {/* Dose: number input + unit pills */}
-            <div>
-              <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Dose</label>
-              <div className="mt-2 flex items-center gap-2">
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={doseStrength}
-                  onChange={e => setDoseStrength(e.target.value)}
-                  placeholder="Amount"
-                  className="flex-1 h-12 px-4 rounded-xl border border-border bg-card text-foreground text-base focus:outline-none focus:ring-2 focus:ring-primary"
-                  data-testid="med-dose-input"
-                />
-                <div className="flex gap-1.5">
-                  {UNITS.map(u => (
-                    <motion.button
-                      key={u}
-                      whileTap={{ scale: 0.92 }}
-                      onClick={() => setDoseUnit(u)}
-                      className={`h-10 px-3 rounded-xl text-xs font-bold transition-colors ${
-                        doseUnit === u ? "bg-primary text-primary-foreground" : "bg-card border border-border text-muted-foreground"
-                      }`}
-                      data-testid={`unit-${u}`}
-                    >
-                      {u}
-                    </motion.button>
-                  ))}
-                </div>
+            {/* ── DOSE ────────────────────────────────────── */}
+            <div className="space-y-3">
+              <label className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">
+                Dose per tablet / serving
+              </label>
+              {/* Amount input + unit — full width, units beneath */}
+              <input
+                type="text"
+                inputMode="decimal"
+                value={doseStrength}
+                onChange={e => setDoseStrength(e.target.value)}
+                placeholder="Amount (e.g. 200, 500, 10)"
+                className={inputClass}
+                data-testid="med-dose-input"
+              />
+              {/* Unit selector — even grid, large tap targets */}
+              <div className="grid grid-cols-4 gap-2">
+                {UNITS.map(u => (
+                  <motion.button
+                    key={u}
+                    whileTap={{ scale: 0.92 }}
+                    onClick={() => setDoseUnit(u)}
+                    className={`h-12 rounded-xl text-sm font-bold transition-colors ${
+                      doseUnit === u
+                        ? "bg-primary text-primary-foreground shadow-sm"
+                        : "bg-card border border-border text-muted-foreground"
+                    }`}
+                    data-testid={`unit-${u}`}
+                  >
+                    {u}
+                  </motion.button>
+                ))}
               </div>
             </div>
 
-            {/* Form: horizontal scroll pill buttons */}
-            <div>
-              <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Form</label>
-              <div className="mt-2 flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+            {/* ── AMOUNT PER DAY (customizable) ────────────── */}
+            <div className="space-y-3">
+              <label className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">
+                How many per day?
+              </label>
+              {/* Quick tap presets */}
+              <div className="grid grid-cols-4 gap-2">
+                {["1", "2", "3", "4"].map(n => (
+                  <motion.button
+                    key={n}
+                    whileTap={{ scale: 0.92 }}
+                    onClick={() => {
+                      setDosesPerDay(n);
+                      // Sync times to match
+                      const count = parseInt(n);
+                      const defaults = ["08:00", "12:00", "18:00", "21:00"];
+                      const curr = times.slice(0, count);
+                      const needed = count - curr.length;
+                      setTimes([...curr, ...defaults.slice(curr.length, curr.length + needed)]);
+                    }}
+                    className={`h-14 rounded-xl text-xl font-black transition-colors ${
+                      dosesPerDay === n
+                        ? "bg-primary text-primary-foreground shadow-sm"
+                        : "bg-card border border-border text-foreground"
+                    }`}
+                    data-testid={`doses-per-day-${n}`}
+                  >
+                    {n}
+                  </motion.button>
+                ))}
+              </div>
+              {/* Custom input for 5+ */}
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min="1"
+                  max="20"
+                  value={!["1","2","3","4"].includes(dosesPerDay) ? dosesPerDay : ""}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (!v) return;
+                    setDosesPerDay(v);
+                    const count = parseInt(v);
+                    if (!isNaN(count) && count > 0 && count <= 12) {
+                      const defaults = ["08:00","06:00","12:00","18:00","21:00","03:00","09:00","15:00","22:00","04:00","10:00","16:00"];
+                      const curr = times.slice(0, count);
+                      const needed = count - curr.length;
+                      setTimes([...curr, ...defaults.slice(curr.length, curr.length + needed)]);
+                    }
+                  }}
+                  placeholder="Custom (5, 6…)"
+                  className="flex-1 h-12 px-4 rounded-xl border border-dashed border-border bg-card text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  data-testid="custom-doses-per-day"
+                />
+                <p className="text-xs text-muted-foreground font-semibold whitespace-nowrap">times / day</p>
+              </div>
+            </div>
+
+            {/* ── FORM (with icons) ────────────────────────── */}
+            <div className="space-y-3">
+              <label className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">
+                Type
+              </label>
+              <div className="grid grid-cols-3 gap-2">
                 {FORM_OPTIONS.map(f => (
                   <motion.button
                     key={f}
                     whileTap={{ scale: 0.92 }}
                     onClick={() => setForm(f)}
-                    className={`h-10 px-4 rounded-xl text-sm font-semibold whitespace-nowrap flex-shrink-0 transition-colors border ${
+                    className={`h-[72px] rounded-2xl transition-colors border flex flex-col items-center justify-center gap-2 ${
                       form === f
-                        ? "bg-primary text-primary-foreground border-primary"
+                        ? "bg-primary text-primary-foreground border-primary shadow-sm"
                         : "bg-card border-border text-muted-foreground"
                     }`}
                     data-testid={`form-${f}`}
                   >
-                    {f}
+                    <FormIcon name={f} size={24} />
+                    <span className="text-[11px] font-bold leading-none">{f}</span>
                   </motion.button>
                 ))}
               </div>
             </div>
 
-            {/* Frequency: 2×2 grid of 4 tap cards */}
-            <div>
-              <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Frequency</label>
-              <div className="mt-2 grid grid-cols-2 gap-2">
+            {/* ── FREQUENCY ──────────────────────────────────── */}
+            <div className="space-y-3">
+              <label className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">
+                Frequency
+              </label>
+              <div className="grid grid-cols-2 gap-2">
                 {FREQUENCY_OPTIONS.map(opt => (
                   <motion.button
                     key={opt.label}
                     whileTap={{ scale: 0.92 }}
                     onClick={() => handleFrequencySelect(opt)}
-                    className={`h-16 rounded-2xl transition-colors border flex flex-col items-center justify-center gap-0.5 ${
+                    className={`h-[72px] rounded-2xl transition-colors border flex items-center gap-3 px-4 ${
                       frequency === opt.label
-                        ? "bg-primary text-primary-foreground border-primary"
+                        ? "bg-primary text-primary-foreground border-primary shadow-sm"
                         : "bg-card border-border text-foreground"
                     }`}
                     data-testid={`freq-${opt.label.replace(/\s+/g, "-")}`}
                   >
-                    <span className={`text-lg font-black ${frequency === opt.label ? "text-primary-foreground" : "text-muted-foreground"}`}>
-                      {opt.emoji}
-                    </span>
-                    <span className="text-xs font-semibold">{opt.label}</span>
+                    <div className={`flex-shrink-0 ${frequency === opt.label ? "text-primary-foreground" : "text-primary"}`}>
+                      <FreqIcon label={opt.label} />
+                    </div>
+                    <div className="text-left">
+                      <p className="text-sm font-bold leading-tight">{opt.label}</p>
+                    </div>
                   </motion.button>
                 ))}
               </div>
             </div>
 
-            {/* Time(s) */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
-                  <ClockIcon size={12} /> Dose times
-                </label>
-                {times.length < 8 && (
-                  <motion.button
-                    whileTap={{ scale: 0.92 }}
-                    onClick={() => {
-                      const defaults = ["08:00", "12:00", "18:00", "21:00", "06:00", "10:00", "14:00", "22:00"];
-                      const next = defaults.find(t => !times.includes(t)) || "08:00";
-                      setTimes([...times, next]);
-                    }}
-                    className="flex items-center gap-1.5 text-xs font-bold text-primary bg-primary/10 px-3 py-1.5 rounded-full"
-                    data-testid="add-time-btn"
-                  >
-                    <PlusIcon size={12} /> Add time
-                  </motion.button>
-                )}
-              </div>
-
-              {times.length > 0 ? (
+            {/* ── TIMES ─────────────────────────────────────── */}
+            {times.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-black uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+                    <ClockIcon size={12} /> When to take it
+                  </label>
+                  {times.length < 8 && (
+                    <motion.button
+                      whileTap={{ scale: 0.92 }}
+                      onClick={() => {
+                        const defaults = ["08:00","12:00","18:00","21:00","06:00","10:00","14:00","22:00"];
+                        const next = defaults.find(t => !times.includes(t)) || "08:00";
+                        setTimes([...times, next]);
+                        setDosesPerDay(String(times.length + 1));
+                      }}
+                      className="flex items-center gap-1.5 text-xs font-bold text-primary bg-primary/10 px-3 py-1.5 rounded-full"
+                      data-testid="add-time-btn"
+                    >
+                      <PlusIcon size={12} /> Add time
+                    </motion.button>
+                  )}
+                </div>
                 <div className="space-y-2">
                   {times.map((t, i) => (
                     <VisualTimePicker
@@ -1585,45 +1742,50 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
                       }}
                       label={`Dose ${i + 1}`}
                       index={i}
-                      onRemove={times.length > 1 ? () => setTimes(times.filter((_, idx) => idx !== i)) : undefined}
+                      onRemove={times.length > 1 ? () => {
+                        setTimes(times.filter((_, idx) => idx !== i));
+                        setDosesPerDay(String(times.length - 1));
+                      } : undefined}
                     />
                   ))}
                 </div>
-              ) : (
-                <div className="bg-secondary/50 rounded-2xl p-4 text-center">
-                  <p className="text-sm text-muted-foreground">Take as needed — no scheduled times</p>
-                  <motion.button
-                    whileTap={{ scale: 0.92 }}
-                    onClick={() => setTimes(["08:00"])}
-                    className="mt-2 text-xs text-primary font-bold"
-                    data-testid="add-first-time-btn"
-                  >
-                    + Add a time
-                  </motion.button>
-                </div>
-              )}
-            </div>
+              </div>
+            )}
 
-            {/* Optional details section */}
-            <div>
+            {times.length === 0 && (
+              <div className="bg-secondary/40 rounded-2xl p-4 text-center">
+                <p className="text-sm text-muted-foreground">Take as needed — no set times</p>
+                <motion.button
+                  whileTap={{ scale: 0.92 }}
+                  onClick={() => { setTimes(["08:00"]); setDosesPerDay("1"); }}
+                  className="mt-2 text-xs text-primary font-bold"
+                  data-testid="add-first-time-btn"
+                >
+                  + Set a time
+                </motion.button>
+              </div>
+            )}
+
+            {/* ── OPTIONAL DETAILS ──────────────────────────── */}
+            <div className="border border-border rounded-2xl overflow-hidden">
               <motion.button
-                whileTap={{ scale: 0.92 }}
+                whileTap={{ scale: 0.99 }}
                 onClick={() => setShowDetails(v => !v)}
-                className="text-sm font-semibold text-primary"
+                className="w-full flex items-center justify-between px-4 py-4"
                 data-testid="toggle-details-btn"
               >
-                {showDetails ? "Hide details −" : "More details +"}
+                <span className="text-sm font-semibold text-foreground">More details</span>
+                <span className="text-xs text-muted-foreground">{showDetails ? "Hide −" : "Optional +"}</span>
               </motion.button>
-
               <AnimatePresence>
                 {showDetails && (
                   <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
                     className="overflow-hidden"
                   >
-                    <div className="space-y-4 pt-3">
+                    <div className="px-4 pb-4 space-y-4 border-t border-border pt-4">
                       <div>
                         <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
                           What it's for
@@ -1677,7 +1839,7 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
                         />
                         {pillCount && parseInt(pillCount) <= 14 && (
                           <p className="text-xs text-[hsl(var(--nurilo-alert-amber))] mt-1.5 font-medium">
-                            Low supply — you may need a refill soon
+                            Running low — time to refill
                           </p>
                         )}
                       </div>
@@ -1690,12 +1852,12 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
         )}
       </AnimatePresence>
 
-      {/* Save button — always at bottom */}
+      {/* ── Save button ─────────────────────────────────── */}
       <motion.button
-        whileTap={{ scale: 0.92 }}
+        whileTap={{ scale: 0.97 }}
         onClick={() => saveMed.mutate()}
         disabled={!canSave || saveMed.isPending}
-        className="w-full h-[56px] bg-primary text-primary-foreground rounded-2xl font-bold text-base disabled:opacity-40 transition-opacity"
+        className="w-full h-[60px] bg-primary text-primary-foreground rounded-2xl font-bold text-base disabled:opacity-40 transition-opacity shadow-md"
         data-testid="save-medication-btn"
       >
         {saveMed.isPending ? "Saving…" : isEdit ? "Save Changes" : "Save Medication"}
