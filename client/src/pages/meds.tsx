@@ -6,8 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import type { Medication, DoseLog } from "@shared/schema";
 import { searchMedications, getMedByName, searchMedicationsWithFallback } from "@/lib/medicationDatabase";
 import type { MedEntry } from "@/lib/medicationDatabase";
-import { lookupBarcodeInDrugDB, scanWithAIVision, parseCameraError } from "@/lib/medicationScanner";
-import type { ScanResult as MedScanResult } from "@/lib/medicationScanner";
+// medicationScanner.ts kept for potential future barcode integration
 
 // ─── Custom SVG Icons (NO Lucide) ─────────────────────────────────────────────
 
@@ -350,243 +349,227 @@ function VisualTimePicker({ value, onChange, label, index, onRemove }: TimePicke
   );
 }
 
+
 // ─── Camera Scanner ────────────────────────────────────────────────────────────
-// Stage 1: ZXing live barcode scanning (free, open-source, browser-native)
-// Stage 2: OpenFDA NDC lookup from barcode → exact drug name/strength/form
-// Stage 3 (fallback): Claude Vision AI for supplements + foreign meds
+// How it works:
+//   1. Camera opens → live video feed on screen
+//   2. User points phone at any medication bottle/label/box/prescription
+//   3. User taps "Scan" → frame captured as JPEG → sent to Claude Vision AI
+//   4. AI reads the label: brand name, generic name, strength, form, dosage
+//   5. Result auto-fills the medication form
+//
+// Works on any phone, any medication, any supplement, any prescription.
+// No barcode required — reads actual label text with AI vision.
 
 interface CameraScannerProps {
   onResult: (result: Partial<{ name: string; strength: string; unit: string; form: string }>) => void;
   onClose: () => void;
 }
 
-// Smart pattern matching for manual text entry fallback
+// Parse medication text typed manually as fallback
 function parseMedicationLabel(text: string): Partial<{ name: string; strength: string; unit: string; form: string }> {
   const result: Partial<{ name: string; strength: string; unit: string; form: string }> = {};
-
   const strengthMatch = text.match(/(\d+\.?\d*)\s*(mg|mcg|ml|iu|units|g|%)/i);
   if (strengthMatch) {
     result.strength = strengthMatch[1];
     result.unit = strengthMatch[2].toLowerCase().replace("iu", "IU");
   }
-
   const formMatch = text.match(/\b(tablet|capsule|liquid|solution|gel cap|softgel|chewable|patch|cream|inhaler|spray|drops|injection|gummy|powder)\b/i);
   if (formMatch) result.form = formMatch[1].charAt(0).toUpperCase() + formMatch[1].slice(1).toLowerCase();
-
-  const words = text.split(/\s+/)
-    .filter(w => w.length >= 3 && !/^(take|tablet|capsule|oral|daily|dose|each|with|for|the|and|once|twice|times|refills|count|pills|mg|mcg|ml|iu|NDC|exp|lot|mfg|strength|directions|warning|store|keep|light)/i.test(w));
+  const words = text.split(/\s+/).filter(w =>
+    w.length >= 3 &&
+    !/^(take|tablet|capsule|oral|daily|dose|each|with|for|the|and|once|twice|times|mg|mcg|ml|iu|NDC|exp|lot|strength|warning|store)/i.test(w)
+  );
   if (words.length > 0) result.name = words[0].charAt(0).toUpperCase() + words[0].slice(1).toLowerCase();
-
   return result;
 }
 
-type ScanStage = "starting" | "scanning_barcode" | "looking_up" | "scanning_ai" | "done" | "error";
+const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || "https://qpmjghocajyvugjxnkdn.supabase.co";
+const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFwbWpnaG9jYWp5dnVnanhua2RuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1ODM4MDQsImV4cCI6MjA5MDE1OTgwNH0.fzHBvHic5W6BZVUfD-dXEj0x6MaBeM6GyGEUsu8vQt0";
+
+type Stage = "starting" | "live" | "scanning" | "done" | "error";
 
 function CameraScanner({ onResult, onClose }: CameraScannerProps) {
+  // ── Refs (never trigger re-render) ─────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const readerRef = useRef<any>(null);
-  const scanningRef = useRef(false);
+  const isMountedRef = useRef(true);
 
-  const [stage, setStage] = useState<ScanStage>("starting");
+  // ── State ──────────────────────────────────────────────────────────────────
+  const [stage, setStage] = useState<Stage>("starting");
   const [errorMsg, setErrorMsg] = useState("");
-  const [statusMsg, setStatusMsg] = useState("");
-  const [scanResult, setScanResult] = useState<MedScanResult | null>(null);
-  const [cameraMode, setCameraMode] = useState<"environment" | "user">("environment");
+  const [scanResult, setScanResult] = useState<{
+    name: string; brand?: string; strength?: string; unit?: string; form?: string; confidence?: string;
+  } | null>(null);
+  const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
   const [manualInput, setManualInput] = useState("");
   const [showManual, setShowManual] = useState(false);
-  const [lastBarcode, setLastBarcode] = useState("");
+  const [scanCount, setScanCount] = useState(0); // tracks retries for hints
 
-  const stopScanning = useCallback(() => {
-    scanningRef.current = false;
-    if (readerRef.current) {
-      try { readerRef.current.stopAsyncDecode?.(); } catch {}
-      try { readerRef.current.reset?.(); } catch {}
-      readerRef.current = null;
-    }
-  }, []);
-
-  const stopCamera = useCallback(() => {
-    stopScanning();
+  // ── Camera lifecycle ───────────────────────────────────────────────────────
+  const stopStream = () => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
     }
-  }, [stopScanning]);
+  };
 
-  const startBarcodeScan = useCallback(async (video: HTMLVideoElement) => {
-    if (scanningRef.current) return;
-
-    try {
-      // Dynamically import ZXing so it doesn't block initial render
-      const { BrowserMultiFormatReader, NotFoundException } = await import("@zxing/browser");
-      const reader = new BrowserMultiFormatReader();
-      readerRef.current = reader;
-      scanningRef.current = true;
-
-      setStage("scanning_barcode");
-      setStatusMsg("Point at the barcode on the bottle");
-
-      // Continuously decode from the video stream
-      reader.decodeFromVideoElement(video, (result, error) => {
-        if (!scanningRef.current) return;
-
-        if (result) {
-          const barcode = result.getText();
-          if (!barcode || barcode === lastBarcode) return;
-
-          // Validate: only accept numeric barcodes (UPC/EAN for drugs)
-          // Skip QR codes that aren't medication barcodes
-          const format = result.getBarcodeFormat();
-          const isNumericBarcode = /^\d{8,14}$/.test(barcode);
-          if (!isNumericBarcode) return;
-
-          setLastBarcode(barcode);
-          stopScanning();
-          handleBarcodeFound(barcode);
-        }
-      });
-
-    } catch (err) {
-      console.error("ZXing init error:", err);
-      // ZXing failed — fall back to AI vision directly
-      setStage("scanning_ai");
-      setStatusMsg("Using AI to identify label…");
-    }
-  }, [lastBarcode, stopScanning]);
-
-  const handleBarcodeFound = useCallback(async (barcode: string) => {
-    setStage("looking_up");
-    setStatusMsg(`Found barcode: ${barcode} — looking up drug…`);
-
-    const result = await lookupBarcodeInDrugDB(barcode);
-
-    if (result) {
-      setScanResult(result);
-      setStage("done");
-      setStatusMsg("");
-    } else {
-      // Barcode not in drug database — try AI vision as fallback
-      setStatusMsg("Not found in database. Trying AI scan…");
-      await runAIScan();
-    }
-  }, []);
-
-  const runAIScan = useCallback(async () => {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas) {
-      setStage("done");
-      setErrorMsg("Could not capture image. Use Type Label below.");
-      setShowManual(true);
-      return;
-    }
-
-    if (video.readyState < 2) {
-      setStage("done");
-      setErrorMsg("Camera not ready. Try again.");
-      setShowManual(true);
-      return;
-    }
-
-    setStage("scanning_ai");
-    setStatusMsg("AI is reading the label…");
-
-    const w = video.videoWidth || 1280;
-    const h = video.videoHeight || 720;
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      setStage("done");
-      setErrorMsg("Canvas not available.");
-      setShowManual(true);
-      return;
-    }
-    ctx.drawImage(video, 0, 0, w, h);
-    const imageDataUrl = canvas.toDataURL("image/jpeg", 0.95);
-
-    if (imageDataUrl.length < 5000) {
-      setStage("done");
-      setErrorMsg("Could not capture image from camera.");
-      setShowManual(true);
-      return;
-    }
-
-    const aiResult = await scanWithAIVision(imageDataUrl);
-
-    if (aiResult) {
-      setScanResult(aiResult);
-      setStage("done");
-      setStatusMsg("");
-    } else {
-      setStage("done");
-      setErrorMsg("Couldn't identify this medication. Try typing the label below.");
-      setShowManual(true);
-    }
-  }, []);
-
-  const startCamera = useCallback(async (facingMode: "environment" | "user" = "environment") => {
-    stopCamera();
+  const openCamera = async (mode: "environment" | "user") => {
+    stopStream();
+    if (!isMountedRef.current) return;
     setStage("starting");
     setErrorMsg("");
-    setScanResult(null);
-    setShowManual(false);
-    setLastBarcode("");
 
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
-        throw Object.assign(new Error("Camera API not available"), { name: "NotSupportedError" });
+        throw Object.assign(new Error("Camera not available"), { name: "NotSupportedError" });
       }
 
+      // Request the highest resolution available for better AI reading
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: { ideal: facingMode },
-          width: { ideal: 1920, min: 640 },
-          height: { ideal: 1080, min: 480 },
+          facingMode: { ideal: mode },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
         },
         audio: false,
       });
 
+      if (!isMountedRef.current) { stream.getTracks().forEach(t => t.stop()); return; }
       streamRef.current = stream;
 
-      if (videoRef.current) {
-        const video = videoRef.current;
-        video.srcObject = stream;
+      const video = videoRef.current;
+      if (!video) return;
 
-        await new Promise<void>((resolve, reject) => {
-          const timeout = setTimeout(() => reject(new Error("Video ready timeout")), 10000);
-          video.onloadedmetadata = () => { clearTimeout(timeout); resolve(); };
-          video.onerror = () => { clearTimeout(timeout); reject(new Error("Video element error")); };
-        });
+      video.srcObject = stream;
 
-        try { await video.play(); } catch (e: any) {
-          if (e?.name !== "AbortError") throw e;
-        }
+      // Wait for video to have actual frame data
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error("Camera ready timeout")), 15000);
+        const done = () => { clearTimeout(t); resolve(); };
+        if (video.readyState >= 2) { done(); return; }
+        video.addEventListener("loadedmetadata", done, { once: true });
+        video.addEventListener("error", () => { clearTimeout(t); reject(new Error("Video error")); }, { once: true });
+      });
 
-        // Start barcode scanning immediately
-        startBarcodeScan(video);
+      try { await video.play(); } catch (e: any) {
+        if (e?.name !== "AbortError") throw e;
       }
-    } catch (err) {
-      const scanError = parseCameraError(err);
-      setErrorMsg(scanError.message);
+
+      if (!isMountedRef.current) return;
+      setStage("live");
+
+    } catch (err: any) {
+      if (!isMountedRef.current) return;
+      const name = err?.name || "";
+      if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+        setErrorMsg("Camera permission denied. Tap the lock icon in your browser address bar and allow camera access.");
+      } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+        setErrorMsg("No camera found on this device.");
+      } else if (name === "NotReadableError" || name === "TrackStartError") {
+        setErrorMsg("Camera is in use by another app. Close other apps and try again.");
+      } else if (name === "NotSupportedError" || name === "OverconstrainedError") {
+        setErrorMsg("Camera not supported on this browser. Please use Chrome or Safari.");
+      } else {
+        setErrorMsg(`Could not start camera: ${err?.message || "Unknown error"}`);
+      }
       setStage("error");
     }
-  }, [stopCamera, startBarcodeScan]);
+  };
 
+  // Start camera on mount, stop on unmount
   useEffect(() => {
-    startCamera("environment");
-    return () => stopCamera();
-  }, []);
+    isMountedRef.current = true;
+    openCamera("environment");
+    return () => {
+      isMountedRef.current = false;
+      stopStream();
+    };
+  }, []); // intentionally empty — runs once on mount only
 
-  const handleManualParse = () => {
-    if (!manualInput.trim()) return;
-    const parsed = parseMedicationLabel(manualInput);
-    if (parsed.name) {
-      onResult(parsed);
-    } else {
-      setErrorMsg("Couldn't parse that. Make sure to include the medication name.");
+  // ── AI Scan ────────────────────────────────────────────────────────────────
+  const captureAndScan = async () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas || stage !== "live") return;
+
+    // Double-check video has frames
+    if (video.readyState < 2 || !video.videoWidth) {
+      setErrorMsg("Camera not ready yet — wait a moment and try again.");
+      return;
+    }
+
+    setStage("scanning");
+    setErrorMsg("");
+    setScanCount(c => c + 1);
+
+    // Capture full-resolution frame
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d")!;
+    ctx.drawImage(video, 0, 0, w, h);
+
+    // High quality JPEG — important for AI to read small text
+    const imageDataUrl = canvas.toDataURL("image/jpeg", 0.95);
+
+    if (imageDataUrl.length < 8000) {
+      setStage("live");
+      setErrorMsg("Frame capture failed — make sure camera is fully started.");
+      return;
+    }
+
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 40000);
+
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/scan-medication`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+          "apikey": SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({ image: imageDataUrl }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeout);
+
+      if (!isMountedRef.current) return;
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => "");
+        throw new Error(`Server error ${response.status}: ${errText.slice(0, 100)}`);
+      }
+
+      const data = await response.json();
+
+      if (data.error || !data.name) {
+        setStage("live");
+        setErrorMsg(
+          scanCount === 0
+            ? "Couldn't read the label. Move closer and make sure the text is in focus."
+            : "Still can't read it. Try better lighting or use 'Type Label' below."
+        );
+        return;
+      }
+
+      setScanResult(data);
+      setStage("done");
+
+    } catch (err: any) {
+      if (!isMountedRef.current) return;
+      setStage("live");
+      if (err?.name === "AbortError") {
+        setErrorMsg("Scan timed out — the AI is warming up. Try again in a few seconds.");
+      } else if (err?.message?.includes("Failed to fetch") || err?.message?.includes("NetworkError")) {
+        setErrorMsg("No internet connection. Check your connection and try again.");
+      } else {
+        setErrorMsg(`Scan error: ${err?.message || "Unknown"}. Try again or type the label.`);
+      }
     }
   };
 
@@ -600,154 +583,187 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
     });
   };
 
-  const stageLabel: Record<ScanStage, string> = {
-    starting: "Starting camera…",
-    scanning_barcode: "Scanning barcode…",
-    looking_up: "Looking up drug…",
-    scanning_ai: "AI reading label…",
-    done: "",
-    error: "",
+  const flipCamera = () => {
+    const next = facingMode === "environment" ? "user" : "environment";
+    setFacingMode(next);
+    setScanResult(null);
+    setShowManual(false);
+    openCamera(next);
   };
 
+  const rescan = () => {
+    setScanResult(null);
+    setErrorMsg("");
+    setShowManual(false);
+    // Don't restart camera — just go back to live
+    if (streamRef.current) {
+      setStage("live");
+    } else {
+      openCamera(facingMode);
+    }
+  };
+
+  const handleManualParse = () => {
+    if (!manualInput.trim()) return;
+    const parsed = parseMedicationLabel(manualInput);
+    onResult(parsed);
+  };
+
+  // ── UI ─────────────────────────────────────────────────────────────────────
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.97 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.97 }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 bg-black flex flex-col"
       data-testid="camera-scanner"
     >
       {/* Top bar */}
-      <div className="flex items-center justify-between px-4 pt-12 pb-3">
+      <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 pt-12 pb-3">
         <motion.button
           whileTap={{ scale: 0.88 }}
           onClick={onClose}
-          className="w-10 h-10 rounded-full bg-white/15 flex items-center justify-center text-white"
+          className="w-11 h-11 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white border border-white/20"
           data-testid="close-camera"
         >
           <XIcon size={18} />
         </motion.button>
-        <div className="text-white text-sm font-semibold">Scan Medication</div>
+
+        <div className="bg-black/50 backdrop-blur-sm rounded-full px-4 py-2 border border-white/20">
+          <p className="text-white text-sm font-semibold">Scan Medication</p>
+        </div>
+
         <motion.button
           whileTap={{ scale: 0.88 }}
-          onClick={() => {
-            const next = cameraMode === "environment" ? "user" : "environment";
-            setCameraMode(next);
-            startCamera(next);
-          }}
-          className="w-10 h-10 rounded-full bg-white/15 flex items-center justify-center text-white"
+          onClick={flipCamera}
+          className="w-11 h-11 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white border border-white/20"
           data-testid="flip-camera"
         >
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round">
-            <path d="M1 4l3-3 3 3" /><path d="M4 1v8a5 5 0 0 0 10 0" />
-            <path d="M17 14l-3 3-3-3" /><path d="M14 17V9A5 5 0 0 0 4 9" />
+          {/* Flip camera icon */}
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+            <path d="M2 5l3-3 3 3M5 2v9a4 4 0 008 0" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M18 15l-3 3-3-3M15 18V9A4 4 0 007 9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
         </motion.button>
       </div>
 
-      {/* Camera view */}
-      <div className="flex-1 relative overflow-hidden">
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          className="w-full h-full object-cover"
-          data-testid="camera-video"
-        />
-        <canvas ref={canvasRef} className="hidden" />
+      {/* Video feed — full screen */}
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        className="absolute inset-0 w-full h-full object-cover"
+        data-testid="camera-video"
+      />
+      <canvas ref={canvasRef} className="hidden" />
 
-        {/* Scanning overlay — barcode frame */}
-        {(stage === "scanning_barcode") && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-            {/* Barcode scan box */}
-            <div className="relative w-72 h-36 mb-4">
-              {[
-                "top-0 left-0 border-t-4 border-l-4 rounded-tl-lg",
-                "top-0 right-0 border-t-4 border-r-4 rounded-tr-lg",
-                "bottom-0 left-0 border-b-4 border-l-4 rounded-bl-lg",
-                "bottom-0 right-0 border-b-4 border-r-4 rounded-br-lg",
-              ].map((cls, i) => (
-                <div key={i} className={`absolute w-8 h-8 border-white/90 ${cls}`} />
-              ))}
-              <motion.div
-                className="absolute left-2 right-2 h-0.5 bg-primary/80"
-                animate={{ top: ["8%", "88%", "8%"] }}
-                transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-              />
-            </div>
-            <div className="bg-black/50 rounded-2xl px-5 py-2.5 text-center">
-              <p className="text-white text-sm font-semibold">Point at barcode</p>
-              <p className="text-white/60 text-xs mt-0.5">Scanning automatically…</p>
-            </div>
-          </div>
-        )}
-
-        {/* Loading/processing overlay */}
-        {(stage === "starting" || stage === "looking_up" || stage === "scanning_ai") && (
-          <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-4">
+      {/* Starting spinner */}
+      {stage === "starting" && (
+        <div className="absolute inset-0 bg-black flex items-center justify-center">
+          <div className="text-center space-y-4">
             <motion.div
               animate={{ rotate: 360 }}
               transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-              className="w-14 h-14 rounded-full border-2 border-white/20 border-t-white"
+              className="w-12 h-12 rounded-full border-2 border-white/20 border-t-white mx-auto"
             />
-            <div className="text-center">
-              <p className="text-white text-sm font-semibold">{stageLabel[stage]}</p>
-              {statusMsg && <p className="text-white/60 text-xs mt-1 px-6 text-center">{statusMsg}</p>}
-            </div>
+            <p className="text-white/70 text-sm">Starting camera…</p>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Error overlay */}
-        {stage === "error" && (
-          <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-4 px-6">
-            <div className="w-16 h-16 rounded-full bg-destructive/20 flex items-center justify-center">
-              <WarnIcon size={28} className="text-destructive" />
+      {/* Scanning overlay */}
+      {stage === "scanning" && (
+        <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+          <div className="text-center space-y-4">
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
+              className="w-16 h-16 rounded-full border-2 border-white/30 border-t-primary mx-auto"
+            />
+            <div className="bg-black/70 backdrop-blur-sm rounded-2xl px-6 py-4">
+              <p className="text-white font-semibold">Reading label…</p>
+              <p className="text-white/60 text-xs mt-1">AI is identifying the medication</p>
             </div>
-            <p className="text-white text-sm text-center leading-relaxed">{errorMsg}</p>
-            <motion.button
-              whileTap={{ scale: 0.92 }}
-              onClick={() => startCamera(cameraMode)}
-              className="px-6 py-3 bg-primary text-primary-foreground rounded-xl text-sm font-semibold"
-            >
-              Try Again
-            </motion.button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Aiming guide — only when live */}
+      {stage === "live" && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="relative w-[280px] h-[180px]">
+            {/* Corner brackets */}
+            {[
+              "top-0 left-0 border-t-[3px] border-l-[3px] rounded-tl-2xl",
+              "top-0 right-0 border-t-[3px] border-r-[3px] rounded-tr-2xl",
+              "bottom-0 left-0 border-b-[3px] border-l-[3px] rounded-bl-2xl",
+              "bottom-0 right-0 border-b-[3px] border-r-[3px] rounded-br-2xl",
+            ].map((cls, i) => (
+              <div key={i} className={`absolute w-10 h-10 border-white ${cls}`} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Error overlay */}
+      {stage === "error" && (
+        <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center gap-5 px-8">
+          <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center">
+            <WarnIcon size={32} className="text-red-400" />
+          </div>
+          <p className="text-white text-center text-sm leading-relaxed">{errorMsg}</p>
+          <motion.button
+            whileTap={{ scale: 0.92 }}
+            onClick={() => openCamera(facingMode)}
+            className="px-8 py-3.5 bg-primary text-primary-foreground rounded-2xl font-semibold"
+          >
+            Try Again
+          </motion.button>
+        </div>
+      )}
 
       {/* Bottom panel */}
-      <div className="px-5 pb-10 pt-4 space-y-3 bg-black">
+      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black via-black/80 to-transparent pt-16 pb-10 px-5 space-y-3">
+
         {/* Scan result */}
         <AnimatePresence>
-          {stage === "done" && scanResult && !showManual && (
+          {stage === "done" && scanResult && (
             <motion.div
-              initial={{ opacity: 0, y: 8 }}
+              initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              className="bg-white/10 rounded-2xl p-4 space-y-1.5"
+              exit={{ opacity: 0, y: 12 }}
+              className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-2xl p-4"
             >
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 mb-2">
                 <div className={`w-2 h-2 rounded-full ${scanResult.confidence === "high" ? "bg-green-400" : "bg-amber-400"}`} />
-                <p className="text-white/60 text-xs font-bold uppercase tracking-widest">
-                  {scanResult.source === "barcode" ? "Barcode matched" : "AI identified"} · {scanResult.confidence} confidence
+                <p className="text-white/50 text-[10px] font-bold uppercase tracking-widest">
+                  Identified · {scanResult.confidence || "medium"} confidence
                 </p>
               </div>
-              <p className="text-white text-lg font-bold">{scanResult.name}</p>
+              <p className="text-white text-lg font-bold leading-snug">{scanResult.name}</p>
               {scanResult.brand && scanResult.brand.toLowerCase() !== scanResult.name.toLowerCase() && (
-                <p className="text-white/60 text-sm">{scanResult.brand}</p>
+                <p className="text-white/60 text-sm mt-0.5">{scanResult.brand}</p>
               )}
               {(scanResult.strength || scanResult.form) && (
-                <p className="text-white/70 text-sm">
-                  {[scanResult.strength && `${scanResult.strength} ${scanResult.unit}`, scanResult.form].filter(Boolean).join(" · ")}
+                <p className="text-white/70 text-sm mt-1">
+                  {[scanResult.strength && `${scanResult.strength} ${scanResult.unit || "mg"}`, scanResult.form]
+                    .filter(Boolean).join(" · ")}
                 </p>
               )}
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Error message */}
-        {stage === "done" && errorMsg && (
-          <p className="text-amber-300 text-xs text-center">{errorMsg}</p>
+        {/* Error message (inline, not full screen — keeps camera live) */}
+        {stage === "live" && errorMsg && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="bg-amber-500/20 border border-amber-500/30 rounded-xl px-4 py-2.5"
+          >
+            <p className="text-amber-200 text-xs text-center leading-relaxed">{errorMsg}</p>
+          </motion.div>
         )}
 
         {/* Manual input */}
@@ -757,15 +773,14 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
               exit={{ opacity: 0, height: 0 }}
-              className="space-y-2"
             >
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={manualInput}
                   onChange={e => setManualInput(e.target.value)}
-                  placeholder='e.g. "Metformin 500mg tablet"'
-                  className="flex-1 h-12 px-4 rounded-xl bg-white/10 text-white text-sm placeholder-white/40 border border-white/20 focus:outline-none focus:border-white/60"
+                  placeholder='e.g. "Advil 200mg" or "Metformin 500mg tablet"'
+                  className="flex-1 h-12 px-4 rounded-2xl bg-white/10 text-white text-sm placeholder-white/40 border border-white/20 focus:outline-none focus:border-white/50"
                   data-testid="manual-label-input"
                   autoFocus
                   onKeyDown={e => e.key === "Enter" && handleManualParse()}
@@ -773,9 +788,9 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
                 <motion.button
                   whileTap={{ scale: 0.88 }}
                   onClick={handleManualParse}
-                  className="h-12 px-4 bg-primary text-primary-foreground rounded-xl text-sm font-semibold"
+                  className="w-12 h-12 bg-primary rounded-2xl flex items-center justify-center text-primary-foreground flex-shrink-0"
                 >
-                  <CheckIcon size={16} />
+                  <CheckIcon size={18} />
                 </motion.button>
               </div>
             </motion.div>
@@ -784,61 +799,62 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
 
         {/* Action buttons */}
         <div className="flex gap-3">
-          {/* Type label button — always visible */}
+          {/* Type label — always visible */}
           <motion.button
             whileTap={{ scale: 0.92 }}
             onClick={() => setShowManual(v => !v)}
-            className="flex-1 h-14 rounded-2xl bg-white/10 text-white text-sm font-semibold border border-white/20"
+            className="h-14 px-5 rounded-2xl bg-white/10 text-white text-sm font-semibold border border-white/20 backdrop-blur-sm flex-shrink-0"
             data-testid="manual-entry-btn"
           >
             Type Label
           </motion.button>
 
-          {/* AI Scan button — available in barcode mode or after failed barcode */}
-          {(stage === "scanning_barcode" || (stage === "done" && !scanResult)) && (
+          {/* Main scan button */}
+          {(stage === "live") && (
             <motion.button
-              whileTap={{ scale: 0.92 }}
-              onClick={runAIScan}
-              className="flex-1 h-14 rounded-2xl bg-primary/80 text-white text-sm font-semibold border border-primary/40 flex items-center justify-center gap-2"
-              data-testid="ai-scan-btn"
+              whileTap={{ scale: 0.94 }}
+              onClick={captureAndScan}
+              className="flex-1 h-14 rounded-2xl bg-primary text-primary-foreground font-bold text-base flex items-center justify-center gap-2.5 shadow-lg"
+              data-testid="capture-btn"
             >
-              <ScanIcon size={16} />
-              AI Scan
+              <ScanIcon size={20} />
+              Scan Label
             </motion.button>
           )}
 
-          {/* Scan Again */}
+          {/* Scan Again (when done or after error back to live) */}
           {stage === "done" && (
             <motion.button
               whileTap={{ scale: 0.92 }}
-              onClick={() => startCamera(cameraMode)}
-              className="flex-1 h-14 rounded-2xl bg-white/10 text-white text-sm font-semibold border border-white/20"
+              onClick={rescan}
+              className="h-14 px-5 rounded-2xl bg-white/10 text-white text-sm font-semibold border border-white/20 backdrop-blur-sm flex-shrink-0"
               data-testid="scan-again-btn"
             >
-              Scan Again
+              Rescan
             </motion.button>
           )}
 
           {/* Confirm */}
-          {stage === "done" && scanResult && !showManual && (
+          {stage === "done" && scanResult && (
             <motion.button
               whileTap={{ scale: 0.92 }}
               onClick={confirmResult}
-              className="flex-1 h-14 rounded-2xl bg-primary text-primary-foreground text-sm font-semibold flex items-center justify-center gap-2"
+              className="flex-1 h-14 rounded-2xl bg-primary text-primary-foreground font-bold flex items-center justify-center gap-2"
               data-testid="confirm-scan-btn"
             >
-              <CheckIcon size={16} />
+              <CheckIcon size={18} />
               Use This
             </motion.button>
           )}
         </div>
 
-        {/* Hint */}
-        {stage === "scanning_barcode" && (
-          <p className="text-white/40 text-xs text-center">
-            No barcode? Tap <strong className="text-white/60">AI Scan</strong> to read the label
-          </p>
-        )}
+        {/* Contextual hint */}
+        <p className="text-white/35 text-xs text-center">
+          {stage === "live" && scanCount === 0 && "Point at the label and tap Scan Label"}
+          {stage === "live" && scanCount > 0 && "Make sure label text is sharp and well-lit"}
+          {stage === "done" && scanResult && "Confirm to use this medication"}
+          {stage === "done" && !scanResult && "Use Type Label to enter it manually"}
+        </p>
       </div>
     </motion.div>
   );
