@@ -262,25 +262,14 @@ function StarIcon({ size = 14 }: { size?: number }) {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const FORMS = [
-  { label: "Tablet", icon: PillTabletIcon },
-  { label: "Capsule", icon: PillCapsuleIcon },
-  { label: "Liquid", icon: PillLiquidIcon },
-  { label: "Inhaler", icon: PillInhalerIcon },
-  { label: "Patch", icon: PillPatchIcon },
-  { label: "Drops", icon: PillDropsIcon },
-  { label: "Injection", icon: PillInjectionIcon },
-];
+const FORM_OPTIONS = ["Tablet", "Capsule", "Liquid", "Softgel", "Patch", "Cream", "Inhaler", "Gummy", "Other"];
 
-const UNITS = ["mg", "mcg", "ml", "IU", "units", "%", "g"];
+const UNITS = ["mg", "mcg", "ml", "IU"];
 
 const FREQUENCY_OPTIONS = [
   { label: "Once daily", times: 1, emoji: "1×" },
   { label: "Twice daily", times: 2, emoji: "2×" },
   { label: "3× daily", times: 3, emoji: "3×" },
-  { label: "4× daily", times: 4, emoji: "4×" },
-  { label: "Every other day", times: 1, emoji: "~" },
-  { label: "Weekly", times: 1, emoji: "7d" },
   { label: "As needed", times: 0, emoji: "PRN" },
 ];
 
@@ -376,7 +365,7 @@ interface CameraScannerProps {
 const SCAN_URL = "https://vytsmfnzaidhpopbleqr.supabase.co/functions/v1/scan-medication";
 const SCAN_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5dHNtZm56YWlkaHBvcGJsZXFyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzOTIwNTMsImV4cCI6MjA4OTk2ODA1M30.Ff0mTzjIeXLNqkBmW5Sv16C9_YkANhqs6QqIINS_ARA";
 
-// ── AI call — hits the full MedScan pipeline (Vision + FDA + RxNorm + DailyMed) ──
+// ── Scan call — hits the full MedScan pipeline (Vision + FDA + RxNorm + DailyMed) ──
 
 async function callScanAI(dataUrl: string): Promise<{
   name?: string; brand?: string; genericName?: string; strength?: string; unit?: string;
@@ -471,6 +460,50 @@ function parseTextLabel(text: string): Partial<{ name: string; strength: string;
   );
   if (words[0]) r.name = words[0].charAt(0).toUpperCase() + words[0].slice(1).toLowerCase();
   return r;
+}
+
+// ── Scanning Overlay with cycling status messages ─────────────────────────────
+
+const SCAN_STATUS_MESSAGES = ["Reading label…", "Checking details…", "Almost there…"];
+
+function ScanningOverlay() {
+  const [msgIndex, setMsgIndex] = useState(0);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setMsgIndex(i => (i + 1) % SCAN_STATUS_MESSAGES.length);
+    }, 2500);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div className="absolute inset-0 bg-black/55 flex flex-col items-center justify-center gap-5 z-10">
+      <div className="relative">
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1.4, repeat: Infinity, ease: "linear" }}
+          className="w-20 h-20 rounded-full border-[3px] border-white/15 border-t-primary"
+        />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <ScanIcon size={24} className="text-white" />
+        </div>
+      </div>
+      <div className="bg-black/80 backdrop-blur rounded-2xl px-8 py-4 text-center">
+        <AnimatePresence>
+          <motion.p
+            key={msgIndex}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            className="text-white font-bold text-base"
+          >
+            {SCAN_STATUS_MESSAGES[msgIndex]}
+          </motion.p>
+        </AnimatePresence>
+        <p className="text-white/50 text-xs mt-1">This takes just a moment</p>
+      </div>
+    </div>
+  );
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -603,7 +636,7 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Handle AI response (uses refs, never stale) ───────────────────────────
+  // ── Handle scan response (uses refs, never stale) ──────────────────────────
   const handleAIResult = (data: Awaited<ReturnType<typeof callScanAI>>, prevStage: ScanStage) => {
     if (!mountedRef.current) return;
 
@@ -681,7 +714,7 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
       setStage("live");
       setErrorMsg(
         err?.name === "AbortError"
-          ? "Scan timed out. The AI is warming up — try again in a moment."
+          ? "Timed out — try again"
           : err?.message?.includes("fetch")
           ? "Network error. Check your connection and try again."
           : "Scan failed. Try again or use Pick Photo."
@@ -886,24 +919,9 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
         </div>
       )}
 
-      {/* AI scanning overlay */}
+      {/* Scanning overlay */}
       {stage === "scanning" && (
-        <div className="absolute inset-0 bg-black/55 flex flex-col items-center justify-center gap-5 z-10">
-          <div className="relative">
-            <motion.div
-              animate={{ rotate: 360 }}
-              transition={{ duration: 1.4, repeat: Infinity, ease: "linear" }}
-              className="w-20 h-20 rounded-full border-[3px] border-white/15 border-t-primary"
-            />
-            <div className="absolute inset-0 flex items-center justify-center">
-              <ScanIcon size={24} className="text-white" />
-            </div>
-          </div>
-          <div className="bg-black/80 backdrop-blur rounded-2xl px-8 py-4 text-center">
-            <p className="text-white font-bold text-base">Identifying medication…</p>
-            <p className="text-white/50 text-xs mt-1">AI Vision + FDA + RxNorm + DailyMed</p>
-          </div>
-        </div>
+        <ScanningOverlay />
       )}
 
       {/* Aim guide when camera is live */}
@@ -1093,7 +1111,7 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
           <p className="text-white/30 text-[11px] text-center select-none">
             {stage === "live"         && "Point label at frame · Scan Label · or Pick Photo from library"}
             {stage === "photo_chosen" && "Photo loading…"}
-            {stage === "scanning"     && "Reading label with AI…"}
+            {stage === "scanning"     && "Reading label…"}
             {stage === "result"       && scanResult && "Tap Use This to add this medication"}
             {stage === "cam_error"    && "Pick Photo works without camera access"}
           </p>
@@ -1253,58 +1271,29 @@ function MedSearchInput({ value, onChange, onSelect, onOpenCamera }: MedSearchPr
   );
 }
 
-// ─── Step Indicator ───────────────────────────────────────────────────────────
-
-function StepIndicator({ current, total }: { current: number; total: number }) {
-  return (
-    <div className="flex items-center gap-2">
-      {Array.from({ length: total }, (_, i) => (
-        <div
-          key={i}
-          className={`rounded-full transition-all duration-300 ${
-            i < current
-              ? "w-6 h-2 bg-primary"
-              : i === current
-                ? "w-8 h-2 bg-primary"
-                : "w-2 h-2 bg-border"
-          }`}
-        />
-      ))}
-    </div>
-  );
-}
-
-// ─── MedForm — 4-Step Wizard ──────────────────────────────────────────────────
+// ─── MedForm — Single-Screen Form ─────────────────────────────────────────────
 
 function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
   const isEdit = !!med;
-  const totalSteps = 4;
-  const [step, setStep] = useState(0);
   const [showCamera, setShowCamera] = useState(false);
+  const [showDetails, setShowDetails] = useState(isEdit);
 
-  // Step 1: What med
+  // Fields
   const [name, setName] = useState(med?.name || "");
-
-  // Step 2: Dose + Form
   const [doseStrength, setDoseStrength] = useState(med?.dose_strength || "");
   const [doseUnit, setDoseUnit] = useState(med?.dose_unit || "mg");
   const [form, setForm] = useState(med?.form || "Tablet");
-
-  // Step 3: Schedule
   const [frequency, setFrequency] = useState(med?.frequency || "Once daily");
   const [times, setTimes] = useState<string[]>(
     med ? JSON.parse(med.schedule_times) : ["08:00"]
   );
-
-  // Step 4: Details
   const [purpose, setPurpose] = useState(med?.purpose || "");
   const [doctor, setDoctor] = useState(med?.doctor || "");
   const [pharmacy, setPharmacy] = useState(med?.pharmacy || "");
   const [pillCount, setPillCount] = useState<string>(med?.pill_count?.toString() || "");
   const [interactionWarning, setInteractionWarning] = useState<{ severity: string; message: string } | null>(null);
 
-  // If editing, go straight to step 1 (all steps accessible)
-  const [editMode] = useState(isEdit);
+  const canSave = name.trim().length > 0;
 
   const saveMed = useMutation({
     mutationFn: async () => {
@@ -1369,26 +1358,7 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
     if (result.unit) setDoseUnit(result.unit);
     if (result.form) setForm(result.form);
     setShowCamera(false);
-    // If we got a name, advance to step 2
-    if (result.name) {
-      setTimeout(() => setStep(1), 200);
-    }
   };
-
-  const canAdvance = () => {
-    if (step === 0) return name.trim().length > 0;
-    if (step === 1) return doseStrength.trim().length > 0;
-    if (step === 2) return true;
-    return true;
-  };
-
-  const stepTitles = ["What medication?", "Dose & form", "Schedule", "Extra details"];
-  const stepSubtitles = [
-    "Search by name or scan the label",
-    "How much per dose?",
-    "When do you take it?",
-    "Optional — helps with refills & care",
-  ];
 
   const inputClass = "w-full h-14 px-4 rounded-2xl border border-border bg-card text-foreground text-base focus:outline-none focus:ring-2 focus:ring-primary transition-shadow";
 
@@ -1406,43 +1376,64 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 20 }}
-      className="space-y-6 pb-8"
+      className="space-y-5 pb-8"
     >
       {/* Header */}
       <div className="flex items-center gap-3">
-        {step > 0 && !editMode ? (
-          <motion.button
-            whileTap={{ scale: 0.88 }}
-            onClick={() => setStep(s => s - 1)}
-            className="w-11 h-11 rounded-xl bg-secondary flex items-center justify-center flex-shrink-0"
-            data-testid="back-step-btn"
-          >
-            <ChevronLeftIcon size={20} />
-          </motion.button>
-        ) : (
-          <motion.button
-            whileTap={{ scale: 0.88 }}
-            onClick={onClose}
-            className="w-11 h-11 rounded-xl bg-secondary flex items-center justify-center flex-shrink-0"
-            data-testid="close-med-form"
-          >
-            <XIcon size={18} />
-          </motion.button>
-        )}
-
-        <div className="flex-1">
-          <h2 className="text-lg font-bold tracking-tight leading-snug">
-            {isEdit ? "Edit Medication" : stepTitles[step]}
-          </h2>
-          {!isEdit && (
-            <p className="text-xs text-muted-foreground mt-0.5">{stepSubtitles[step]}</p>
-          )}
-        </div>
-
-        {!isEdit && (
-          <StepIndicator current={step} total={totalSteps} />
-        )}
+        <motion.button
+          whileTap={{ scale: 0.92 }}
+          onClick={onClose}
+          className="w-11 h-11 rounded-xl bg-secondary flex items-center justify-center flex-shrink-0"
+          data-testid="close-med-form"
+        >
+          <XIcon size={18} />
+        </motion.button>
+        <h2 className="text-lg font-bold tracking-tight leading-snug">
+          {isEdit ? "Edit Medication" : "Add Medication"}
+        </h2>
       </div>
+
+      {/* Scan Label button (add mode only) */}
+      {!isEdit && (
+        <motion.button
+          whileTap={{ scale: 0.92 }}
+          onClick={() => setShowCamera(true)}
+          className="w-full h-14 bg-primary text-primary-foreground rounded-2xl font-bold text-base flex items-center justify-center gap-3 shadow-sm"
+          data-testid="scan-label-card"
+        >
+          <CameraIcon size={22} />
+          Scan Label
+        </motion.button>
+      )}
+
+      {/* Search / type input */}
+      {!name ? (
+        <MedSearchInput
+          value={name}
+          onChange={setName}
+          onSelect={handleSelectFromDB}
+          onOpenCamera={() => setShowCamera(true)}
+        />
+      ) : (
+        /* Name pill/chip */
+        <div className="flex items-center gap-2">
+          <div className="flex-1 flex items-center gap-2 bg-primary/10 border border-primary/20 rounded-xl px-4 py-3">
+            <CheckIcon size={16} />
+            <span className="text-sm font-bold text-foreground truncate">{name}</span>
+            {doseStrength && (
+              <span className="text-xs text-muted-foreground ml-1">{doseStrength} {doseUnit}</span>
+            )}
+          </div>
+          <motion.button
+            whileTap={{ scale: 0.92 }}
+            onClick={() => { setName(""); setDoseStrength(""); }}
+            className="w-10 h-10 rounded-xl bg-secondary flex items-center justify-center text-muted-foreground flex-shrink-0"
+            data-testid="clear-name-btn"
+          >
+            <XIcon size={16} />
+          </motion.button>
+        </div>
+      )}
 
       {/* Interaction warning */}
       <AnimatePresence>
@@ -1471,225 +1462,100 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
         )}
       </AnimatePresence>
 
-      {/* ── STEP 0: What medication ─────────────────────────────────────────── */}
+      {/* ── Remaining fields (visible once name is set) ───────────────────────── */}
       <AnimatePresence>
-        {(step === 0 || editMode) && (
+        {name.trim() && (
           <motion.div
-            key="step0"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            className="space-y-4"
-          >
-            {/* Camera scan promo card */}
-            {!editMode && (
-              <motion.button
-                whileTap={{ scale: 0.97 }}
-                onClick={() => setShowCamera(true)}
-                className="w-full bg-primary/5 border-2 border-dashed border-primary/30 rounded-2xl p-5 flex items-center gap-4"
-                data-testid="scan-label-card"
-              >
-                <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center flex-shrink-0">
-                  <CameraIcon size={26} />
-                </div>
-                <div className="text-left">
-                  <p className="text-sm font-bold text-primary">Scan Label</p>
-                  <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
-                    Point camera at any prescription or supplement bottle
-                  </p>
-                </div>
-                <ChevronRightIcon size={16} />
-              </motion.button>
-            )}
-
-            <div className="relative flex items-center gap-4">
-              <div className="flex-1 h-px bg-border" />
-              <span className="text-xs text-muted-foreground font-semibold uppercase tracking-widest">or type below</span>
-              <div className="flex-1 h-px bg-border" />
-            </div>
-
-            <MedSearchInput
-              value={name}
-              onChange={setName}
-              onSelect={handleSelectFromDB}
-              onOpenCamera={() => setShowCamera(true)}
-            />
-
-            {/* If we have a name from camera/DB, show it prominently */}
-            {name && (
-              <div className="flex items-center gap-3 bg-primary/5 border border-primary/20 rounded-2xl px-4 py-3">
-                <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
-                  <CheckIcon size={16} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-foreground truncate">{name}</p>
-                  {doseStrength && (
-                    <p className="text-xs text-muted-foreground">{doseStrength} {doseUnit} · {form}</p>
-                  )}
-                </div>
-                <motion.button
-                  whileTap={{ scale: 0.88 }}
-                  onClick={() => { setName(""); setDoseStrength(""); }}
-                  className="text-muted-foreground"
-                >
-                  <XIcon size={16} />
-                </motion.button>
-              </div>
-            )}
-          </motion.div>
-        )}
-
-        {/* ── STEP 1: Dose & Form ─────────────────────────────────────────────── */}
-        {(step === 1 || editMode) && !showCamera && (
-          <motion.div
-            key="step1"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
+            key="fields"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 12 }}
             className="space-y-5"
           >
-            {editMode && (
-              <div>
-                <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Medication Name</label>
-                <MedSearchInput
-                  value={name}
-                  onChange={setName}
-                  onSelect={handleSelectFromDB}
-                  onOpenCamera={() => setShowCamera(true)}
+            {/* Dose: number input + unit pills */}
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Dose</label>
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={doseStrength}
+                  onChange={e => setDoseStrength(e.target.value)}
+                  placeholder="Amount"
+                  className="flex-1 h-12 px-4 rounded-xl border border-border bg-card text-foreground text-base focus:outline-none focus:ring-2 focus:ring-primary"
+                  data-testid="med-dose-input"
                 />
-              </div>
-            )}
-
-            {/* Dose strength */}
-            <div>
-              <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Dose Amount</label>
-              {/* Quick-tap common doses */}
-              <div className="mt-2 flex flex-wrap gap-2 mb-2">
-                {["5","10","25","50","100","200","250","500","1000"].map(preset => (
-                  <motion.button
-                    key={preset}
-                    whileTap={{ scale: 0.88 }}
-                    onClick={() => setDoseStrength(preset)}
-                    className={`h-9 px-3.5 rounded-xl text-sm font-bold transition-colors ${
-                      doseStrength === preset
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-card border border-border text-muted-foreground"
-                    }`}
-                    data-testid={`dose-preset-${preset}`}
-                  >
-                    {preset}
-                  </motion.button>
-                ))}
-              </div>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={doseStrength}
-                onChange={e => setDoseStrength(e.target.value)}
-                placeholder="Or type any amount (e.g. 325, 2.5, 1000)"
-                className={inputClass}
-                data-testid="med-dose-input"
-              />
-            </div>
-
-            {/* Unit selector */}
-            <div>
-              <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Unit</label>
-              <div className="mt-2 grid grid-cols-4 gap-2">
-                {UNITS.map(u => (
-                  <motion.button
-                    key={u}
-                    whileTap={{ scale: 0.92 }}
-                    onClick={() => setDoseUnit(u)}
-                    className={`h-12 rounded-xl text-sm font-bold transition-colors ${
-                      doseUnit === u ? "bg-primary text-primary-foreground" : "bg-card border border-border text-muted-foreground"
-                    }`}
-                    data-testid={`unit-${u}`}
-                  >
-                    {u}
-                  </motion.button>
-                ))}
+                <div className="flex gap-1.5">
+                  {UNITS.map(u => (
+                    <motion.button
+                      key={u}
+                      whileTap={{ scale: 0.92 }}
+                      onClick={() => setDoseUnit(u)}
+                      className={`h-10 px-3 rounded-xl text-xs font-bold transition-colors ${
+                        doseUnit === u ? "bg-primary text-primary-foreground" : "bg-card border border-border text-muted-foreground"
+                      }`}
+                      data-testid={`unit-${u}`}
+                    >
+                      {u}
+                    </motion.button>
+                  ))}
+                </div>
               </div>
             </div>
 
-            {/* Form selector — large icon cards */}
+            {/* Form: horizontal scroll pill buttons */}
             <div>
               <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Form</label>
-              <div className="mt-2 grid grid-cols-4 gap-2">
-                {FORMS.map(({ label, icon: Icon }) => (
+              <div className="mt-2 flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+                {FORM_OPTIONS.map(f => (
                   <motion.button
-                    key={label}
-                    whileTap={{ scale: 0.88 }}
-                    onClick={() => setForm(label)}
-                    className={`flex flex-col items-center gap-1.5 py-3 rounded-2xl transition-colors border ${
-                      form === label
+                    key={f}
+                    whileTap={{ scale: 0.92 }}
+                    onClick={() => setForm(f)}
+                    className={`h-10 px-4 rounded-xl text-sm font-semibold whitespace-nowrap flex-shrink-0 transition-colors border ${
+                      form === f
                         ? "bg-primary text-primary-foreground border-primary"
                         : "bg-card border-border text-muted-foreground"
                     }`}
-                    data-testid={`form-${label}`}
+                    data-testid={`form-${f}`}
                   >
-                    <Icon size={24} />
-                    <span className="text-[10px] font-semibold leading-none">{label}</span>
+                    {f}
                   </motion.button>
                 ))}
               </div>
             </div>
-          </motion.div>
-        )}
 
-        {/* ── STEP 2: Schedule ────────────────────────────────────────────────── */}
-        {(step === 2 || editMode) && !showCamera && (
-          <motion.div
-            key="step2"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            className="space-y-5"
-          >
-            {/* Frequency selector */}
+            {/* Frequency: 2×2 grid of 4 tap cards */}
             <div>
-              <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">How often?</label>
+              <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Frequency</label>
               <div className="mt-2 grid grid-cols-2 gap-2">
                 {FREQUENCY_OPTIONS.map(opt => (
                   <motion.button
                     key={opt.label}
-                    whileTap={{ scale: 0.94 }}
+                    whileTap={{ scale: 0.92 }}
                     onClick={() => handleFrequencySelect(opt)}
-                    className={`h-14 px-4 rounded-2xl transition-colors border flex items-center gap-3 ${
+                    className={`h-16 rounded-2xl transition-colors border flex flex-col items-center justify-center gap-0.5 ${
                       frequency === opt.label
                         ? "bg-primary text-primary-foreground border-primary"
                         : "bg-card border-border text-foreground"
                     }`}
                     data-testid={`freq-${opt.label.replace(/\s+/g, "-")}`}
                   >
-                    <span className={`text-sm font-black w-8 text-center flex-shrink-0 ${frequency === opt.label ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                    <span className={`text-lg font-black ${frequency === opt.label ? "text-primary-foreground" : "text-muted-foreground"}`}>
                       {opt.emoji}
                     </span>
-                    <span className="text-sm font-semibold text-left leading-snug">{opt.label}</span>
+                    <span className="text-xs font-semibold">{opt.label}</span>
                   </motion.button>
                 ))}
               </div>
-              {/* Custom frequency text field */}
-              <div className="mt-2">
-                <input
-                  type="text"
-                  placeholder="Custom schedule (e.g. Every Monday, Every 8 hours…)"
-                  value={FREQUENCY_OPTIONS.some(o => o.label === frequency) ? "" : frequency}
-                  onChange={e => setFrequency(e.target.value || frequency)}
-                  onFocus={e => { if (FREQUENCY_OPTIONS.some(o => o.label === frequency)) e.target.value = ""; }}
-                  className="w-full h-12 px-4 rounded-2xl border border-dashed border-border bg-card text-foreground text-sm placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                  data-testid="custom-frequency-input"
-                />
-              </div>
             </div>
 
-            {/* Dose times — easy tap-to-set pickers */}
+            {/* Time(s) */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
                   <ClockIcon size={12} /> Dose times
                 </label>
-                {/* Add time button */}
                 {times.length < 8 && (
                   <motion.button
                     whileTap={{ scale: 0.92 }}
@@ -1737,138 +1603,103 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
                 </div>
               )}
             </div>
-          </motion.div>
-        )}
 
-        {/* ── STEP 3: Details ─────────────────────────────────────────────────── */}
-        {(step === 3 || editMode) && !showCamera && (
-          <motion.div
-            key="step3"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            className="space-y-4"
-          >
+            {/* Optional details section */}
             <div>
-              <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
-                What it's for <span className="normal-case font-normal text-xs">(optional)</span>
-              </label>
-              <input
-                type="text"
-                value={purpose}
-                onChange={e => setPurpose(e.target.value)}
-                placeholder="e.g., Blood pressure, anxiety"
-                className={`mt-2 ${inputClass}`}
-                data-testid="med-purpose-input"
-              />
-            </div>
+              <motion.button
+                whileTap={{ scale: 0.92 }}
+                onClick={() => setShowDetails(v => !v)}
+                className="text-sm font-semibold text-primary"
+                data-testid="toggle-details-btn"
+              >
+                {showDetails ? "Hide details −" : "More details +"}
+              </motion.button>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
-                  Doctor <span className="normal-case font-normal">(opt.)</span>
-                </label>
-                <input
-                  type="text"
-                  value={doctor}
-                  onChange={e => setDoctor(e.target.value)}
-                  placeholder="Dr. Smith"
-                  className={`mt-2 ${inputClass}`}
-                  data-testid="med-doctor-input"
-                />
-              </div>
-              <div>
-                <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
-                  Pharmacy <span className="normal-case font-normal">(opt.)</span>
-                </label>
-                <input
-                  type="text"
-                  value={pharmacy}
-                  onChange={e => setPharmacy(e.target.value)}
-                  placeholder="CVS, Walgreens…"
-                  className={`mt-2 ${inputClass}`}
-                  data-testid="med-pharmacy-input"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
-                Pills remaining <span className="normal-case font-normal">(optional)</span>
-              </label>
-              <input
-                type="number"
-                inputMode="numeric"
-                value={pillCount}
-                onChange={e => setPillCount(e.target.value)}
-                placeholder="e.g., 30"
-                min="0"
-                className={`mt-2 ${inputClass}`}
-                data-testid="med-pillcount-input"
-              />
-              {pillCount && parseInt(pillCount) <= 14 && (
-                <p className="text-xs text-[hsl(var(--nurilo-alert-amber))] mt-1.5 font-medium">
-                  Low supply — you may need a refill soon
-                </p>
-              )}
+              <AnimatePresence>
+                {showDetails && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="space-y-4 pt-3">
+                      <div>
+                        <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+                          What it's for
+                        </label>
+                        <input
+                          type="text"
+                          value={purpose}
+                          onChange={e => setPurpose(e.target.value)}
+                          placeholder="e.g., Blood pressure, anxiety"
+                          className={`mt-2 ${inputClass}`}
+                          data-testid="med-purpose-input"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Doctor</label>
+                          <input
+                            type="text"
+                            value={doctor}
+                            onChange={e => setDoctor(e.target.value)}
+                            placeholder="Dr. Smith"
+                            className={`mt-2 ${inputClass}`}
+                            data-testid="med-doctor-input"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Pharmacy</label>
+                          <input
+                            type="text"
+                            value={pharmacy}
+                            onChange={e => setPharmacy(e.target.value)}
+                            placeholder="CVS, Walgreens…"
+                            className={`mt-2 ${inputClass}`}
+                            data-testid="med-pharmacy-input"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+                          Pills remaining
+                        </label>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          value={pillCount}
+                          onChange={e => setPillCount(e.target.value)}
+                          placeholder="e.g., 30"
+                          min="0"
+                          className={`mt-2 ${inputClass}`}
+                          data-testid="med-pillcount-input"
+                        />
+                        {pillCount && parseInt(pillCount) <= 14 && (
+                          <p className="text-xs text-[hsl(var(--nurilo-alert-amber))] mt-1.5 font-medium">
+                            Low supply — you may need a refill soon
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── Navigation buttons ─────────────────────────────────────────────────── */}
-      {!showCamera && (
-        <div className="pt-2">
-          {/* Edit mode: single save button */}
-          {editMode ? (
-            <motion.button
-              whileTap={{ scale: 0.97 }}
-              onClick={() => saveMed.mutate()}
-              disabled={!name.trim() || !doseStrength.trim() || saveMed.isPending}
-              className="w-full h-[56px] bg-primary text-primary-foreground rounded-2xl font-bold text-base disabled:opacity-40 transition-opacity"
-              data-testid="save-medication-btn"
-            >
-              {saveMed.isPending ? "Saving…" : "Save Changes"}
-            </motion.button>
-          ) : step < totalSteps - 1 ? (
-            /* Next step */
-            <motion.button
-              whileTap={{ scale: 0.97 }}
-              onClick={() => canAdvance() && setStep(s => s + 1)}
-              disabled={!canAdvance()}
-              className="w-full h-[56px] bg-primary text-primary-foreground rounded-2xl font-bold text-base disabled:opacity-40 transition-opacity flex items-center justify-center gap-2"
-              data-testid="next-step-btn"
-            >
-              Continue
-              <ChevronRightIcon size={16} />
-            </motion.button>
-          ) : (
-            /* Final step: save */
-            <motion.button
-              whileTap={{ scale: 0.97 }}
-              onClick={() => saveMed.mutate()}
-              disabled={!name.trim() || !doseStrength.trim() || saveMed.isPending}
-              className="w-full h-[56px] bg-primary text-primary-foreground rounded-2xl font-bold text-base disabled:opacity-40 transition-opacity"
-              data-testid="save-medication-btn"
-            >
-              {saveMed.isPending ? "Saving…" : "Save Medication"}
-            </motion.button>
-          )}
-
-          {/* Skip details (step 3) */}
-          {!editMode && step === 3 && (
-            <motion.button
-              whileTap={{ scale: 0.97 }}
-              onClick={() => saveMed.mutate()}
-              disabled={!name.trim() || !doseStrength.trim() || saveMed.isPending}
-              className="w-full h-11 mt-2 text-muted-foreground text-sm font-medium rounded-2xl hover:bg-secondary transition-colors"
-              data-testid="skip-details-btn"
-            >
-              Skip details & save
-            </motion.button>
-          )}
-        </div>
-      )}
+      {/* Save button — always at bottom */}
+      <motion.button
+        whileTap={{ scale: 0.92 }}
+        onClick={() => saveMed.mutate()}
+        disabled={!canSave || saveMed.isPending}
+        className="w-full h-[56px] bg-primary text-primary-foreground rounded-2xl font-bold text-base disabled:opacity-40 transition-opacity"
+        data-testid="save-medication-btn"
+      >
+        {saveMed.isPending ? "Saving…" : isEdit ? "Save Changes" : "Save Medication"}
+      </motion.button>
     </motion.div>
   );
 }
