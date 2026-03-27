@@ -87,7 +87,7 @@ function ChatBubble({ message, onFeedback }: { message: ChatMessage; onFeedback:
       <div className={`max-w-[85%] ${isUser ? "order-last" : ""}`}>
         {!isUser && (
           <div className="flex items-center gap-2 mb-1.5">
-            <div className="w-6 h-6 rounded-full bg-primary/12 flex items-center justify-center text-primary">
+            <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary">
               <SparkleIcon size={12} />
             </div>
             <span className="text-[11px] font-bold text-muted-foreground tracking-wide">CLARITY</span>
@@ -118,14 +118,14 @@ function ChatBubble({ message, onFeedback }: { message: ChatMessage; onFeedback:
           <div className="flex items-center gap-2 mt-1.5 ml-1">
             <button
               onClick={() => onFeedback(message.id, "thumbs_up")}
-              className={`p-1 rounded-lg transition-colors ${message.feedback === "thumbs_up" ? "text-primary bg-primary/8" : "text-muted-foreground/40 hover:text-primary"}`}
+              className={`p-1 rounded-lg transition-colors ${message.feedback === "thumbs_up" ? "text-primary bg-primary/10" : "text-muted-foreground/40 hover:text-primary"}`}
               data-testid={`thumbs-up-${message.id}`}
             >
               <ThumbUpIcon size={13} />
             </button>
             <button
               onClick={() => onFeedback(message.id, "thumbs_down")}
-              className={`p-1 rounded-lg transition-colors ${message.feedback === "thumbs_down" ? "text-destructive bg-destructive/8" : "text-muted-foreground/40 hover:text-destructive"}`}
+              className={`p-1 rounded-lg transition-colors ${message.feedback === "thumbs_down" ? "text-destructive bg-destructive/10" : "text-muted-foreground/40 hover:text-destructive"}`}
               data-testid={`thumbs-down-${message.id}`}
             >
               <ThumbDownIcon size={13} />
@@ -226,7 +226,7 @@ export default function ClarityPage() {
                 >
                   <button
                     onClick={() => clearChatMut.mutate()}
-                    className="w-full px-4 py-3 text-left text-sm flex items-center gap-2.5 text-destructive hover:bg-destructive/8 transition-colors"
+                    className="w-full px-4 py-3 text-left text-sm flex items-center gap-2.5 text-destructive hover:bg-destructive/10 transition-colors"
                     data-testid="clear-chat-btn"
                   >
                     <TrashIcon size={14} /> Clear conversation
@@ -281,7 +281,7 @@ export default function ClarityPage() {
 
         {sendMessage.isPending && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-2.5">
-            <div className="w-6 h-6 rounded-full bg-primary/12 flex items-center justify-center text-primary">
+            <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary">
               <SparkleIcon size={11} />
             </div>
             <div className="flex gap-1.5 items-center">

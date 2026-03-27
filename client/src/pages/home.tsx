@@ -205,12 +205,30 @@ function CompletionOverlay({ name, onDismiss }: { name: string; onDismiss: () =>
           className="mx-auto mb-6"
         >
           <svg width="80" height="80" viewBox="0 0 80 80" fill="none">
-            <circle cx="40" cy="40" r="36" stroke="white" strokeWidth="2.5" opacity="0.25" />
-            <circle cx="40" cy="40" r="36" stroke="white" strokeWidth="2.5"
-              strokeDasharray="226" strokeDashoffset="0"
-              style={{ animation: "draw-check 0.8s ease-out forwards" }} />
-            <path d="M26 40 L36 50 L54 30" stroke="white" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"
-              className="animate-draw-check" style={{ animationDelay: "0.3s" }} />
+            <circle cx="40" cy="40" r="36" stroke="white" strokeWidth="2.5" opacity="0.20" />
+            <motion.circle
+              cx="40" cy="40" r="36"
+              stroke="white"
+              strokeWidth="2.5"
+              fill="none"
+              strokeLinecap="round"
+              strokeDasharray="226"
+              initial={{ strokeDashoffset: 226 }}
+              animate={{ strokeDashoffset: 0 }}
+              transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
+            />
+            <motion.path
+              d="M26 40 L36 50 L54 30"
+              stroke="white"
+              strokeWidth="3.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill="none"
+              strokeDasharray="40"
+              initial={{ strokeDashoffset: 40 }}
+              animate={{ strokeDashoffset: 0 }}
+              transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1], delay: 0.35 }}
+            />
           </svg>
         </motion.div>
         <motion.p
@@ -327,7 +345,7 @@ export default function HomePage() {
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ type: "spring", stiffness: 200, damping: 18 }}
-            className="flex items-center gap-1.5 bg-[hsl(var(--nurilo-alert-amber))]/12 text-[hsl(var(--nurilo-alert-amber))] px-3 py-1.5 rounded-xl"
+            className="flex items-center gap-1.5 bg-[hsl(var(--nurilo-alert-amber))]/10 text-[hsl(var(--nurilo-alert-amber))] px-3 py-1.5 rounded-xl"
             data-testid="streak-badge"
           >
             <LeafFlameIcon size={15} />
@@ -467,7 +485,7 @@ export default function HomePage() {
           data-testid="health-tip"
         >
           <div className="flex items-start gap-3">
-            <div className="w-9 h-9 rounded-xl bg-primary/12 flex items-center justify-center flex-shrink-0 mt-0.5 text-primary">
+            <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5 text-primary">
               <SeedTipIcon size={17} />
             </div>
             <div className="flex-1 min-w-0">

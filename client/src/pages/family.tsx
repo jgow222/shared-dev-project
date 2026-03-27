@@ -36,9 +36,9 @@ function BellIcon({ size = 12 }: { size?: number }) {
   );
 }
 
-function WarnIcon({ size = 16 }: { size?: number }) {
+function WarnIcon({ size = 16, className }: { size?: number; className?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className={className}>
       <path d="M8 2L14.5 13H1.5L8 2Z" />
       <line x1="8" y1="7" x2="8" y2="10" />
       <circle cx="8" cy="11.5" r="0.5" fill="currentColor" stroke="none" />
@@ -218,6 +218,7 @@ function MemberDetail({ member, onClose }: { member: FamilyMember; onClose: () =
   const [showNudge, setShowNudge] = useState(false);
   const [customNudge, setCustomNudge] = useState("");
   const [showMenu, setShowMenu] = useState(false);
+  const [nudgeSent, setNudgeSent] = useState(false);
 
   const { data: meds = [] } = useQuery<FamilyMedication[]>({
     queryKey: ["family", member.id, "medications"],
@@ -233,7 +234,11 @@ function MemberDetail({ member, onClose }: { member: FamilyMember; onClose: () =
         response: null,
       });
     },
-    onSuccess: () => { setShowNudge(false); setCustomNudge(""); },
+    onSuccess: () => {
+      setCustomNudge("");
+      setNudgeSent(true);
+      setTimeout(() => { setNudgeSent(false); setShowNudge(false); }, 1800);
+    },
   });
 
   const deleteMember = useMutation({
@@ -381,7 +386,7 @@ function MemberDetail({ member, onClose }: { member: FamilyMember; onClose: () =
                 </motion.button>
               </div>
 
-              {sendNudge.isSuccess && (
+              {nudgeSent && (
                 <p className="text-xs text-[hsl(var(--nurilo-success))] font-medium">Nudge sent</p>
               )}
             </div>
@@ -633,13 +638,7 @@ export default function FamilyPage() {
   const alertMembers = members.filter(m => m.status === "red" || m.status === "amber");
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -4 }}
-      transition={{ duration: 0.22 }}
-      className="px-4 py-6 space-y-6"
-    >
+    <div className="px-4 py-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -738,6 +737,6 @@ export default function FamilyPage() {
           </div>
         )}
       </section>
-    </motion.div>
+    </div>
   );
 }
