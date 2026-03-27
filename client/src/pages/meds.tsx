@@ -351,355 +351,411 @@ function VisualTimePicker({ value, onChange, label, index, onRemove }: TimePicke
 
 
 
-// ─── Camera Scanner ────────────────────────────────────────────────────────────
-// Google Lens for medications: point camera → tap Scan → AI identifies it.
+// ─── Medication Scanner ───────────────────────────────────────────────────────
 //
-// Works two ways:
-//   A) Live camera (requires HTTPS) → point at bottle → tap Scan Label
-//   B) Photo upload (works on any connection) → pick from photos → instant scan
+// Works like Google Lens — but for medications.
+//   → Take a photo of ANY bottle, label, box, or prescription
+//   → AI (Claude Vision) reads the text and identifies exactly what it is
+//   → Name, brand, strength, form — auto-filled instantly
 //
-// The AI (Claude Vision) reads the actual label text and returns structured data.
-// Works for: OTC drugs, prescription bottles, vitamins, supplements, anything.
+// Two modes:
+//   1. LIVE CAMERA — point phone at bottle, tap Scan (needs HTTPS in prod)
+//   2. PICK PHOTO  — pick any existing photo from device (works ALWAYS)
+//
+// Architecture: all async state lives in refs to eliminate stale closures.
+// No useCallback needed — refs are always current.
 
 interface CameraScannerProps {
   onResult: (result: Partial<{ name: string; strength: string; unit: string; form: string }>) => void;
   onClose: () => void;
 }
 
-function parseMedicationLabel(text: string): Partial<{ name: string; strength: string; unit: string; form: string }> {
-  const result: Partial<{ name: string; strength: string; unit: string; form: string }> = {};
-  const strengthMatch = text.match(/(\d+\.?\d*)\s*(mg|mcg|ml|iu|units|g|%)/i);
-  if (strengthMatch) {
-    result.strength = strengthMatch[1];
-    result.unit = strengthMatch[2].toLowerCase().replace("iu", "IU");
-  }
-  const formMatch = text.match(/\b(tablet|capsule|liquid|solution|gel cap|softgel|chewable|patch|cream|inhaler|spray|drops|injection|gummy|powder)\b/i);
-  if (formMatch) result.form = formMatch[1].charAt(0).toUpperCase() + formMatch[1].slice(1).toLowerCase();
-  const words = text.split(/\s+/).filter(w =>
-    w.length >= 3 &&
-    !/^(take|tablet|capsule|oral|daily|dose|each|with|for|the|and|once|twice|times|mg|mcg|ml|iu|NDC|exp|lot|strength|warning|store)/i.test(w)
-  );
-  if (words.length > 0) result.name = words[0].charAt(0).toUpperCase() + words[0].slice(1).toLowerCase();
-  return result;
-}
+// ── Constants ─────────────────────────────────────────────────────────────────
 
-const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || "https://qpmjghocajyvugjxnkdn.supabase.co";
-const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFwbWpnaG9jYWp5dnVnanhua2RuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1ODM4MDQsImV4cCI6MjA5MDE1OTgwNH0.fzHBvHic5W6BZVUfD-dXEj0x6MaBeM6GyGEUsu8vQt0";
+const SCAN_URL = (() => {
+  const base = (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_SUPABASE_URL)
+    || "https://qpmjghocajyvugjxnkdn.supabase.co";
+  return `${base}/functions/v1/scan-medication`;
+})();
 
-// Send any base64 image to the AI and get medication data back
-async function identifyMedication(imageDataUrl: string, signal?: AbortSignal): Promise<{
-  name?: string; brand?: string; strength?: string; unit?: string; form?: string;
-  confidence?: string; raw_text?: string; error?: string;
+const SCAN_KEY = (typeof import.meta !== "undefined" && (import.meta as any).env?.VITE_SUPABASE_ANON_KEY)
+  || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFwbWpnaG9jYWp5dnVnanhua2RuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1ODM4MDQsImV4cCI6MjA5MDE1OTgwNH0.fzHBvHic5W6BZVUfD-dXEj0x6MaBeM6GyGEUsu8vQt0";
+
+// ── AI call — dead simple, no wrapper layers ──────────────────────────────────
+
+async function callScanAI(dataUrl: string): Promise<{
+  name?: string; brand?: string; strength?: string; unit?: string;
+  form?: string; confidence?: string; raw_text?: string; error?: string;
 }> {
-  const response = await fetch(`${SUPABASE_URL}/functions/v1/scan-medication`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
-      "apikey": SUPABASE_ANON_KEY,
-    },
-    body: JSON.stringify({ image: imageDataUrl }),
-    signal,
-  });
+  const ctrl = new AbortController();
+  // 45 second timeout — enough for cold starts
+  const tid = setTimeout(() => ctrl.abort(), 45_000);
 
-  if (!response.ok) {
-    const err = await response.text().catch(() => "");
-    throw new Error(`Scan failed (${response.status}): ${err.slice(0, 120)}`);
+  try {
+    const res = await fetch(SCAN_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${SCAN_KEY}`,
+        "apikey": SCAN_KEY,
+      },
+      body: JSON.stringify({ image: dataUrl }),
+      signal: ctrl.signal,
+    });
+
+    clearTimeout(tid);
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`HTTP ${res.status}: ${body.slice(0, 100)}`);
+    }
+
+    return await res.json();
+  } catch (err) {
+    clearTimeout(tid);
+    throw err;
   }
-
-  return response.json();
 }
 
-type Stage = "starting" | "live" | "scanning" | "done" | "error" | "photo_preview";
+// ── Resize image for optimal AI reading (max 1600px, quality 0.92) ─────────────
+
+function resizeDataUrl(dataUrl: string, maxDim = 1600): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      let { naturalWidth: w, naturalHeight: h } = img;
+      if (w > maxDim || h > maxDim) {
+        const scale = Math.min(maxDim / w, maxDim / h);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { resolve(dataUrl); return; }
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/jpeg", 0.92));
+    };
+    img.onerror = () => reject(new Error("Image load failed"));
+    img.src = dataUrl;
+  });
+}
+
+// ── Read file as data URL — iOS-safe ─────────────────────────────────────────
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === "string" && result.startsWith("data:image")) {
+        resolve(result);
+      } else {
+        reject(new Error("Invalid file data"));
+      }
+    };
+    reader.onerror = () => reject(reader.error || new Error("FileReader error"));
+    reader.readAsDataURL(file);
+  });
+}
+
+// ── Manual label text parser ──────────────────────────────────────────────────
+
+function parseTextLabel(text: string): Partial<{ name: string; strength: string; unit: string; form: string }> {
+  const r: Partial<{ name: string; strength: string; unit: string; form: string }> = {};
+  const s = text.match(/(\d+\.?\d*)\s*(mg|mcg|ml|iu|units|g|%)/i);
+  if (s) { r.strength = s[1]; r.unit = s[2].toLowerCase().replace("iu", "IU"); }
+  const f = text.match(/\b(tablet|capsule|liquid|solution|softgel|gel cap|chewable|patch|cream|inhaler|spray|drops|injection|gummy|powder)\b/i);
+  if (f) r.form = f[1].charAt(0).toUpperCase() + f[1].slice(1).toLowerCase();
+  const words = text.split(/\s+/).filter(w =>
+    w.length >= 3 && !/^(take|tablet|capsule|oral|daily|dose|each|with|for|the|and|once|twice|times|mg|mcg|ml|iu|NDC|exp|lot|strength|warning|store)/i.test(w)
+  );
+  if (words[0]) r.name = words[0].charAt(0).toUpperCase() + words[0].slice(1).toLowerCase();
+  return r;
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
+type ScanStage =
+  | "starting"       // camera initialising
+  | "live"           // camera feed active
+  | "photo_chosen"   // user picked a photo, showing preview
+  | "scanning"       // AI call in flight
+  | "result"         // AI returned a good result
+  | "cam_error";     // camera failed (but photo path still works)
 
 function CameraScanner({ onResult, onClose }: CameraScannerProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // ── DOM refs ───────────────────────────────────────────────────────────────
+  const videoRef    = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const isMountedRef = useRef(true);
-  const abortRef = useRef<AbortController | null>(null);
+  const streamRef   = useRef<MediaStream | null>(null);
 
-  const [stage, setStage] = useState<Stage>("starting");
-  const [errorMsg, setErrorMsg] = useState("");
-  const [scanResult, setScanResult] = useState<{
-    name: string; brand?: string; strength?: string; unit?: string;
-    form?: string; confidence?: string;
+  // ── Mutable refs (no stale-closure risk) ───────────────────────────────────
+  const mountedRef   = useRef(true);
+  const stageRef     = useRef<ScanStage>("starting");
+
+  // ── Render state ───────────────────────────────────────────────────────────
+  const [stage,      setStageState]  = useState<ScanStage>("starting");
+  const [errorMsg,   setErrorMsg]    = useState("");
+  const [scanResult, setScanResult]  = useState<{
+    name: string; brand?: string; strength?: string; unit?: string; form?: string; confidence?: string;
   } | null>(null);
-  const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
-  const [manualInput, setManualInput] = useState("");
-  const [showManual, setShowManual] = useState(false);
-  const [previewSrc, setPreviewSrc] = useState(""); // for photo upload preview
-  const [cameraAvailable, setCameraAvailable] = useState(true);
-  const [scanCount, setScanCount] = useState(0);
+  const [photoSrc,   setPhotoSrc]    = useState("");   // preview data URL
+  const [manualText, setManualText]  = useState("");
+  const [showManual, setShowManual]  = useState(false);
+  const [facingMode, setFacingMode]  = useState<"environment" | "user">("environment");
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
+  // Keeps stageRef in sync so async callbacks always see current stage
+  const setStage = (s: ScanStage) => { stageRef.current = s; setStageState(s); };
 
+  // ── Stop camera stream ─────────────────────────────────────────────────────
   const stopStream = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
-    }
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
   };
 
-  const handleAIResult = (data: Awaited<ReturnType<typeof identifyMedication>>) => {
-    // Accept result if we got a meaningful name (even medium confidence)
-    if (data.error || !data.name || data.name.toLowerCase() === "unknown medication" || data.name.toLowerCase() === "unknown") {
-      setScanCount(c => c + 1);
-      setStage(stage === "photo_preview" ? "photo_preview" : "live");
-      setErrorMsg(
-        scanCount === 0
-          ? "Couldn't read the label. Make sure the text is visible and well-lit, then try again."
-          : "Still having trouble. Move closer to the label or try 'Pick a Photo' instead."
-      );
+  // ── Open camera ───────────────────────────────────────────────────────────
+  const openCamera = async (mode: "environment" | "user" = "environment") => {
+    stopStream();
+    if (!mountedRef.current) return;
+    setStage("starting");
+    setErrorMsg("");
+
+    // HTTPS / secure context check
+    if (window.location.protocol !== "https:" && window.location.hostname !== "localhost") {
+      setErrorMsg("Camera needs HTTPS. Use Pick Photo below — it works on any connection.");
+      setStage("cam_error");
       return;
     }
 
-    setScanResult({
-      name: data.name,
-      brand: data.brand || undefined,
-      strength: data.strength || undefined,
-      unit: data.unit || undefined,
-      form: data.form || undefined,
-      confidence: data.confidence || "medium",
-    });
-    setStage("done");
-    setErrorMsg("");
-  };
-
-  // ── Camera ─────────────────────────────────────────────────────────────────
-
-  const openCamera = async (mode: "environment" | "user") => {
-    stopStream();
-    if (!isMountedRef.current) return;
-    setStage("starting");
-    setErrorMsg("");
-    setScanResult(null);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setErrorMsg("Camera not supported in this browser. Use Pick Photo below.");
+      setStage("cam_error");
+      return;
+    }
 
     try {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        throw Object.assign(new Error("Camera API unavailable"), { name: "NotSupportedError" });
-      }
-
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: mode }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        video: {
+          facingMode: { ideal: mode },
+          width: { ideal: 1920, min: 640 },
+          height: { ideal: 1080, min: 480 },
+        },
         audio: false,
       });
 
-      if (!isMountedRef.current) { stream.getTracks().forEach(t => t.stop()); return; }
+      if (!mountedRef.current) { stream.getTracks().forEach(t => t.stop()); return; }
       streamRef.current = stream;
 
       const video = videoRef.current;
-      if (!video) return;
+      if (!video) { stream.getTracks().forEach(t => t.stop()); return; }
+
       video.srcObject = stream;
 
-      await new Promise<void>((resolve, reject) => {
-        const t = setTimeout(() => reject(new Error("Camera timeout")), 15000);
-        const done = () => { clearTimeout(t); resolve(); };
-        if (video.readyState >= 2) { done(); return; }
-        video.addEventListener("loadedmetadata", done, { once: true });
-        video.addEventListener("error", () => { clearTimeout(t); reject(new Error("Video error")); }, { once: true });
+      // Wait for first frame
+      await new Promise<void>((res, rej) => {
+        const tid = setTimeout(() => rej(new Error("Camera timeout")), 15_000);
+        const ok = () => { clearTimeout(tid); res(); };
+        if (video.readyState >= 2) { ok(); return; }
+        video.addEventListener("loadedmetadata", ok, { once: true });
+        video.addEventListener("error",          () => { clearTimeout(tid); rej(new Error("Video element error")); }, { once: true });
       });
 
       try { await video.play(); } catch (e: any) {
         if (e?.name !== "AbortError") throw e;
       }
 
-      setCameraAvailable(true);
+      if (!mountedRef.current) return;
       setStage("live");
 
     } catch (err: any) {
-      if (!isMountedRef.current) return;
-      setCameraAvailable(false);
-
-      const name = err?.name || "";
-      if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-        setErrorMsg("Camera access denied. Allow camera access or use 'Pick a Photo' to scan from your photos.");
-      } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
-        setErrorMsg("No camera found. Use 'Pick a Photo' to scan from your photo library.");
-      } else if (name === "NotReadableError") {
-        setErrorMsg("Camera in use by another app. Close it and try again, or use 'Pick a Photo'.");
-      } else if (name === "NotSupportedError") {
-        // HTTPS required — this is the most common issue
-        setErrorMsg("Camera requires HTTPS. Use 'Pick a Photo' to scan from your photo library — it works on any connection.");
+      if (!mountedRef.current) return;
+      const n = err?.name ?? "";
+      if (n === "NotAllowedError" || n === "PermissionDeniedError") {
+        setErrorMsg("Camera permission denied. Tap Pick Photo to use your photo library instead.");
+      } else if (n === "NotFoundError" || n === "DevicesNotFoundError") {
+        setErrorMsg("No camera found. Use Pick Photo to choose an image from your library.");
+      } else if (n === "NotReadableError" || n === "TrackStartError") {
+        setErrorMsg("Camera is in use by another app. Use Pick Photo instead.");
       } else {
-        setErrorMsg("Camera unavailable. Use 'Pick a Photo' below to still scan your medication.");
+        setErrorMsg(`Camera error: ${err?.message ?? "unknown"}. Use Pick Photo below.`);
       }
-      setStage("error");
+      setStage("cam_error");
     }
   };
 
-  // Warmup the edge function on mount (avoids cold-start delay on first scan)
+  // Mount / unmount
   useEffect(() => {
-    isMountedRef.current = true;
+    mountedRef.current = true;
+
+    // Warm up the edge function silently — no error if it fails
+    callScanAI("warmup").catch(() => {});
+
     openCamera("environment");
 
-    // Fire-and-forget warmup ping
-    fetch(`${SUPABASE_URL}/functions/v1/scan-medication`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SUPABASE_ANON_KEY}`, "apikey": SUPABASE_ANON_KEY },
-      body: JSON.stringify({ image: "warmup" }),
-    }).catch(() => {});
-
     return () => {
-      isMountedRef.current = false;
+      mountedRef.current = false;
       stopStream();
-      abortRef.current?.abort();
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Capture from live camera ───────────────────────────────────────────────
+  // ── Handle AI response (uses refs, never stale) ───────────────────────────
+  const handleAIResult = (data: Awaited<ReturnType<typeof callScanAI>>, prevStage: ScanStage) => {
+    if (!mountedRef.current) return;
 
-  const captureAndScan = async () => {
+    const hasResult = data.name &&
+      data.name.toLowerCase() !== "unknown" &&
+      data.name.toLowerCase() !== "unknown medication" &&
+      !data.error;
+
+    if (hasResult) {
+      setScanResult({
+        name: data.name!,
+        brand:      data.brand      || undefined,
+        strength:   data.strength   || undefined,
+        unit:       data.unit       || undefined,
+        form:       data.form       || undefined,
+        confidence: data.confidence || "medium",
+      });
+      setStage("result");
+      setErrorMsg("");
+    } else {
+      // Restore previous stage so user can try again
+      setStage(prevStage === "photo_chosen" ? "photo_chosen" : "live");
+      setErrorMsg(
+        data.error === "Cannot identify medication from this image"
+          ? "Couldn't read the label. Make sure the text is clearly visible, well-lit, and in focus."
+          : "Couldn't identify this medication. Try a clearer photo or type the name manually."
+      );
+    }
+  };
+
+  // ── Scan live camera frame ─────────────────────────────────────────────────
+  const scanLive = async () => {
+    if (stageRef.current !== "live") return;
     const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas || stage !== "live") return;
-
-    if (video.readyState < 2 || !video.videoWidth) {
-      setErrorMsg("Camera not ready yet — wait a moment and try again.");
+    if (!video || video.readyState < 2 || !video.videoWidth) {
+      setErrorMsg("Camera not ready yet. Wait a moment and try again.");
       return;
     }
 
     setStage("scanning");
     setErrorMsg("");
 
-    const w = video.videoWidth;
-    const h = video.videoHeight;
-    canvas.width = w;
-    canvas.height = h;
-    canvas.getContext("2d")!.drawImage(video, 0, 0, w, h);
-    const imageDataUrl = canvas.toDataURL("image/jpeg", 0.92);
-
-    if (imageDataUrl.length < 8000) {
+    // Capture frame
+    const canvas = document.createElement("canvas");
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
       setStage("live");
-      setErrorMsg("Couldn't capture image — camera may not be fully ready. Try again.");
+      setErrorMsg("Canvas unavailable — try Pick Photo instead.");
+      return;
+    }
+    ctx.drawImage(video, 0, 0);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+
+    if (dataUrl.length < 8_000) {
+      setStage("live");
+      setErrorMsg("Frame too small — hold steady and try again.");
       return;
     }
 
     try {
-      abortRef.current?.abort();
-      abortRef.current = new AbortController();
-      const timeout = setTimeout(() => abortRef.current?.abort(), 40000);
-      const data = await identifyMedication(imageDataUrl, abortRef.current.signal);
-      clearTimeout(timeout);
-      if (!isMountedRef.current) return;
-      handleAIResult(data);
+      const result = await callScanAI(dataUrl);
+      handleAIResult(result, "live");
     } catch (err: any) {
-      if (!isMountedRef.current) return;
+      if (!mountedRef.current) return;
       setStage("live");
-      if (err?.name === "AbortError") {
-        setErrorMsg("Scan timed out — AI is warming up. Try again in a few seconds.");
-      } else if (err?.message?.includes("Failed to fetch")) {
-        setErrorMsg("No internet connection. Check your connection and try again.");
-      } else {
-        setErrorMsg("Scan error — try again or use 'Pick a Photo'.");
-      }
+      setErrorMsg(
+        err?.name === "AbortError"
+          ? "Scan timed out. The AI is warming up — try again in a moment."
+          : err?.message?.includes("fetch")
+          ? "Network error. Check your connection and try again."
+          : "Scan failed. Try again or use Pick Photo."
+      );
     }
   };
 
-  // ── Photo upload path (works on ANY connection, no HTTPS needed) ───────────
+  // ── Scan uploaded photo ────────────────────────────────────────────────────
+  const scanPhoto = async (dataUrl: string) => {
+    setStage("scanning");
+    setErrorMsg("");
 
-  const handlePhotoSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    try {
+      // Resize for optimal AI performance
+      const resized = await resizeDataUrl(dataUrl);
+      const result  = await callScanAI(resized);
+      handleAIResult(result, "photo_chosen");
+    } catch (err: any) {
+      if (!mountedRef.current) return;
+      setStage("photo_chosen");
+      setErrorMsg(
+        err?.name === "AbortError"
+          ? "Scan timed out. Try again."
+          : "Scan failed. Try a clearer photo."
+      );
+    }
+  };
+
+  // ── File picker handler ────────────────────────────────────────────────────
+  const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Capture file ref immediately — React nullifies the event after handler returns
+    const file = e.target.files?.[0] ?? null;
+    // Reset so same file can be picked again
+    e.target.value = "";
+
     if (!file) return;
 
-    // Validate it's an image
-    if (!file.type.startsWith("image/")) {
-      setErrorMsg("Please select an image file.");
+    // Accept any image (type check unreliable on mobile — check filename too)
+    const isImage = file.type.startsWith("image/") ||
+      /\.(jpe?g|png|webp|heic|heif|gif|bmp|tiff?)$/i.test(file.name);
+
+    if (!isImage) {
+      setErrorMsg("Please select an image file (JPG, PNG, HEIC, etc.).");
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      if (!dataUrl) return;
-      setPreviewSrc(dataUrl);
-      setStage("photo_preview");
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      setPhotoSrc(dataUrl);
+      setStage("photo_chosen");
       setErrorMsg("");
       setScanResult(null);
-    };
-    reader.readAsDataURL(file);
-
-    // Reset file input so same file can be re-selected
-    e.target.value = "";
-  };
-
-  const scanPhotoPreview = async () => {
-    if (!previewSrc) return;
-
-    // Resize if needed — keep quality high for label reading
-    const img = new Image();
-    img.src = previewSrc;
-    await new Promise(resolve => { img.onload = resolve; });
-
-    const canvas = canvasRef.current!;
-    const MAX_DIM = 1600;
-    let w = img.naturalWidth, h = img.naturalHeight;
-    if (w > MAX_DIM || h > MAX_DIM) {
-      const scale = Math.min(MAX_DIM / w, MAX_DIM / h);
-      w = Math.round(w * scale);
-      h = Math.round(h * scale);
-    }
-    canvas.width = w;
-    canvas.height = h;
-    canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
-    const imageDataUrl = canvas.toDataURL("image/jpeg", 0.92);
-
-    setStage("scanning");
-    setErrorMsg("");
-
-    try {
-      abortRef.current?.abort();
-      abortRef.current = new AbortController();
-      const timeout = setTimeout(() => abortRef.current?.abort(), 40000);
-      const data = await identifyMedication(imageDataUrl, abortRef.current.signal);
-      clearTimeout(timeout);
-      if (!isMountedRef.current) return;
-      handleAIResult(data);
+      // Auto-scan immediately — no extra tap needed
+      await scanPhoto(dataUrl);
     } catch (err: any) {
-      if (!isMountedRef.current) return;
-      setStage("photo_preview");
-      if (err?.name === "AbortError") {
-        setErrorMsg("Scan timed out. Try again.");
-      } else {
-        setErrorMsg("Scan error — please try again.");
-      }
+      setErrorMsg(`Couldn't read that file: ${err?.message ?? "unknown error"}`);
     }
   };
 
-  // ── Other actions ─────────────────────────────────────────────────────────
-
+  // ── Confirm & fill form ────────────────────────────────────────────────────
   const confirmResult = () => {
     if (!scanResult) return;
-    onResult({ name: scanResult.name, strength: scanResult.strength, unit: scanResult.unit, form: scanResult.form });
+    onResult({
+      name:     scanResult.name,
+      strength: scanResult.strength,
+      unit:     scanResult.unit,
+      form:     scanResult.form,
+    });
   };
 
-  const rescan = () => {
+  const tryAgain = () => {
     setScanResult(null);
     setErrorMsg("");
+    setPhotoSrc("");
     setShowManual(false);
-    setPreviewSrc("");
-    if (cameraAvailable && streamRef.current) {
+    if (streamRef.current) {
       setStage("live");
-    } else if (cameraAvailable) {
-      openCamera(facingMode);
     } else {
-      setStage("error");
+      openCamera(facingMode);
     }
   };
 
-  const handleManualParse = () => {
-    if (!manualInput.trim()) return;
-    const parsed = parseMedicationLabel(manualInput);
-    if (parsed.name) {
-      onResult(parsed);
-    }
-  };
-
-  // ── UI ────────────────────────────────────────────────────────────────────
-
-  const isScanning = stage === "scanning";
-
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -708,31 +764,32 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
       className="fixed inset-0 z-50 bg-black flex flex-col"
       data-testid="camera-scanner"
     >
-      {/* Hidden file input for photo upload */}
+      {/* Hidden file input */}
       <input
         ref={fileInputRef}
         type="file"
         accept="image/*"
-        capture={undefined}
-        className="hidden"
-        onChange={handlePhotoSelected}
+        className="sr-only"
+        onChange={onFileChange}
         data-testid="photo-file-input"
+        aria-hidden="true"
+        tabIndex={-1}
       />
-      <canvas ref={canvasRef} className="hidden" />
 
       {/* Top bar */}
-      <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 pt-12 pb-3">
+      <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 pt-12 pb-3">
         <motion.button
           whileTap={{ scale: 0.88 }}
           onClick={onClose}
-          className="w-11 h-11 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white border border-white/20"
+          className="w-11 h-11 rounded-full bg-black/60 backdrop-blur flex items-center justify-center text-white border border-white/20"
           data-testid="close-camera"
+          aria-label="Close scanner"
         >
           <XIcon size={18} />
         </motion.button>
 
-        <div className="bg-black/50 backdrop-blur-sm rounded-full px-4 py-2 border border-white/20">
-          <p className="text-white text-sm font-semibold">Scan Medication</p>
+        <div className="bg-black/60 backdrop-blur rounded-full px-4 py-2 border border-white/20">
+          <p className="text-white text-sm font-semibold tracking-wide">Scan Medication</p>
         </div>
 
         <motion.button
@@ -740,12 +797,11 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
           onClick={() => {
             const next = facingMode === "environment" ? "user" : "environment";
             setFacingMode(next);
-            setScanResult(null);
-            setPreviewSrc("");
             openCamera(next);
           }}
-          className="w-11 h-11 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white border border-white/20"
+          className="w-11 h-11 rounded-full bg-black/60 backdrop-blur flex items-center justify-center text-white border border-white/20"
           data-testid="flip-camera"
+          aria-label="Flip camera"
         >
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
             <path d="M2 5l3-3 3 3M5 2v9a4 4 0 008 0" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
@@ -754,258 +810,274 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
         </motion.button>
       </div>
 
-      {/* Camera / Photo preview area */}
-      <div className="absolute inset-0">
-        {/* Live video */}
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          className={`w-full h-full object-cover ${stage === "photo_preview" ? "hidden" : ""}`}
-          data-testid="camera-video"
+      {/* Camera video — always rendered so ref is always valid */}
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        className={`absolute inset-0 w-full h-full object-cover ${stage === "photo_chosen" ? "opacity-0" : "opacity-100"}`}
+        data-testid="camera-video"
+      />
+
+      {/* Photo preview */}
+      {photoSrc && (stage === "photo_chosen" || stage === "scanning" || stage === "result") && (
+        <img
+          src={photoSrc}
+          alt="Selected medication photo"
+          className="absolute inset-0 w-full h-full object-contain bg-black"
+          data-testid="photo-preview"
         />
+      )}
 
-        {/* Photo preview */}
-        {stage === "photo_preview" && previewSrc && (
-          <img
-            src={previewSrc}
-            alt="Selected photo"
-            className="w-full h-full object-contain bg-black"
-            data-testid="photo-preview"
-          />
-        )}
-      </div>
-
-      {/* Camera starting overlay */}
+      {/* Camera starting */}
       {stage === "starting" && (
-        <div className="absolute inset-0 bg-black flex items-center justify-center">
-          <div className="text-center space-y-4">
-            <motion.div
-              animate={{ rotate: 360 }}
-              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-              className="w-12 h-12 rounded-full border-2 border-white/20 border-t-white mx-auto"
-            />
-            <p className="text-white/70 text-sm">Starting camera…</p>
+        <div className="absolute inset-0 bg-black flex flex-col items-center justify-center gap-4">
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+            className="w-12 h-12 rounded-full border-2 border-white/20 border-t-white"
+          />
+          <p className="text-white/60 text-sm">Starting camera…</p>
+        </div>
+      )}
+
+      {/* Camera error (full overlay) */}
+      {stage === "cam_error" && (
+        <div className="absolute inset-0 bg-[#0a0a0a] flex flex-col items-center justify-center gap-5 px-8">
+          <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center">
+            <CameraIcon size={28} className="text-primary" />
+          </div>
+          <div className="text-center space-y-2">
+            <p className="text-white font-semibold">Camera unavailable</p>
+            <p className="text-white/60 text-sm leading-relaxed">{errorMsg}</p>
+          </div>
+          <div className="flex flex-col gap-3 w-full">
+            <motion.button
+              whileTap={{ scale: 0.92 }}
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full h-14 rounded-2xl bg-primary text-primary-foreground font-bold text-base flex items-center justify-center gap-2"
+              data-testid="pick-photo-main-btn"
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                <rect x="1" y="4" width="18" height="13" rx="2"/>
+                <circle cx="10" cy="10.5" r="3"/>
+                <path d="M6 4l1.5-2.5h5L14 4"/>
+              </svg>
+              Pick a Photo to Scan
+            </motion.button>
+            <motion.button
+              whileTap={{ scale: 0.92 }}
+              onClick={() => openCamera(facingMode)}
+              className="w-full h-12 rounded-2xl bg-white/10 text-white font-semibold text-sm border border-white/20"
+            >
+              Retry Camera
+            </motion.button>
           </div>
         </div>
       )}
 
-      {/* Scanning overlay */}
+      {/* AI scanning overlay */}
       {stage === "scanning" && (
-        <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-          <div className="text-center space-y-4">
+        <div className="absolute inset-0 bg-black/55 flex flex-col items-center justify-center gap-5 z-10">
+          <div className="relative">
             <motion.div
               animate={{ rotate: 360 }}
-              transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
-              className="w-16 h-16 rounded-full border-2 border-white/30 border-t-primary mx-auto"
+              transition={{ duration: 1.4, repeat: Infinity, ease: "linear" }}
+              className="w-20 h-20 rounded-full border-[3px] border-white/15 border-t-primary"
             />
-            <div className="bg-black/70 backdrop-blur-sm rounded-2xl px-6 py-4">
-              <p className="text-white font-semibold">Reading label…</p>
-              <p className="text-white/60 text-xs mt-1">AI is identifying the medication</p>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <ScanIcon size={24} className="text-white" />
             </div>
           </div>
+          <div className="bg-black/80 backdrop-blur rounded-2xl px-8 py-4 text-center">
+            <p className="text-white font-bold text-base">Identifying medication…</p>
+            <p className="text-white/50 text-xs mt-1">AI is reading the label</p>
+          </div>
         </div>
       )}
 
-      {/* Aim guide — only when live */}
+      {/* Aim guide when camera is live */}
       {stage === "live" && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="relative w-72 h-44">
-            {["top-0 left-0 border-t-[3px] border-l-[3px] rounded-tl-2xl",
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+          <div className="relative w-[280px] h-[175px]">
+            {[
+              "top-0 left-0 border-t-[3px] border-l-[3px] rounded-tl-2xl",
               "top-0 right-0 border-t-[3px] border-r-[3px] rounded-tr-2xl",
               "bottom-0 left-0 border-b-[3px] border-l-[3px] rounded-bl-2xl",
               "bottom-0 right-0 border-b-[3px] border-r-[3px] rounded-br-2xl",
             ].map((cls, i) => (
-              <div key={i} className={`absolute w-10 h-10 border-white/80 ${cls}`} />
+              <div key={i} className={`absolute w-10 h-10 border-white/90 ${cls}`} />
             ))}
-          </div>
-        </div>
-      )}
-
-      {/* Error overlay (camera level — full screen) */}
-      {stage === "error" && (
-        <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center gap-5 px-8">
-          <div className="w-16 h-16 rounded-full bg-amber-500/20 flex items-center justify-center">
-            <CameraIcon size={28} className="text-amber-400" />
-          </div>
-          <p className="text-white text-center text-sm leading-relaxed">{errorMsg}</p>
-          <div className="flex gap-3 w-full">
-            <motion.button
-              whileTap={{ scale: 0.92 }}
-              onClick={() => openCamera(facingMode)}
-              className="flex-1 h-12 rounded-2xl bg-white/10 text-white text-sm font-semibold border border-white/20"
-            >
-              Try Camera
-            </motion.button>
-            <motion.button
-              whileTap={{ scale: 0.92 }}
-              onClick={() => fileInputRef.current?.click()}
-              className="flex-1 h-12 rounded-2xl bg-primary text-primary-foreground text-sm font-semibold"
-              data-testid="pick-photo-error-btn"
-            >
-              Pick a Photo
-            </motion.button>
+            <motion.div
+              className="absolute left-3 right-3 h-0.5 bg-primary/70"
+              animate={{ top: ["8%", "88%", "8%"] }}
+              transition={{ duration: 2.5, repeat: Infinity, ease: "linear" }}
+            />
           </div>
         </div>
       )}
 
       {/* Bottom panel */}
-      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black via-black/85 to-transparent pt-20 pb-10 px-5 space-y-3">
+      <div className="absolute bottom-0 left-0 right-0 z-20">
+        <div className="bg-gradient-to-t from-black via-black/90 to-transparent pt-16 pb-10 px-5 space-y-3">
 
-        {/* Scan result */}
-        <AnimatePresence>
-          {stage === "done" && scanResult && (
+          {/* RESULT CARD */}
+          <AnimatePresence>
+            {stage === "result" && scanResult && (
+              <motion.div
+                initial={{ opacity: 0, y: 16, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 8 }}
+                className="bg-white/12 backdrop-blur border border-white/25 rounded-2xl p-4 space-y-1.5"
+              >
+                <div className="flex items-center gap-2">
+                  <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+                    scanResult.confidence === "high" ? "bg-green-400" : "bg-amber-400"
+                  }`} />
+                  <p className="text-white/50 text-[10px] font-black uppercase tracking-widest">
+                    {scanResult.confidence === "high" ? "Identified" : "Best match"} · {scanResult.confidence} confidence
+                  </p>
+                </div>
+                <p className="text-white text-2xl font-bold leading-tight">{scanResult.name}</p>
+                {scanResult.brand && scanResult.brand.toLowerCase() !== scanResult.name.toLowerCase() && (
+                  <p className="text-white/60 text-sm font-medium">{scanResult.brand}</p>
+                )}
+                {(scanResult.strength || scanResult.form) && (
+                  <p className="text-white/70 text-sm">
+                    {[
+                      scanResult.strength ? `${scanResult.strength} ${scanResult.unit ?? "mg"}` : null,
+                      scanResult.form,
+                    ].filter(Boolean).join("  ·  ")}
+                  </p>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* INLINE ERROR (camera still live — no full-screen takeover) */}
+          {(stage === "live" || stage === "photo_chosen") && errorMsg && (
             <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 12 }}
-              className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-2xl p-4 space-y-1"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="bg-amber-500/20 border border-amber-400/30 rounded-xl px-4 py-2.5"
             >
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${scanResult.confidence === "high" ? "bg-green-400" : "bg-amber-400"}`} />
-                <p className="text-white/50 text-[10px] font-bold uppercase tracking-widest">
-                  {scanResult.confidence === "high" ? "Identified" : "Best match"} · {scanResult.confidence} confidence
-                </p>
-              </div>
-              <p className="text-white text-xl font-bold leading-tight">{scanResult.name}</p>
-              {scanResult.brand && scanResult.brand.toLowerCase() !== scanResult.name.toLowerCase() && (
-                <p className="text-white/60 text-sm">{scanResult.brand}</p>
-              )}
-              {(scanResult.strength || scanResult.form) && (
-                <p className="text-white/70 text-sm">
-                  {[scanResult.strength && `${scanResult.strength} ${scanResult.unit || "mg"}`, scanResult.form].filter(Boolean).join(" · ")}
-                </p>
-              )}
+              <p className="text-amber-200 text-xs text-center leading-relaxed">{errorMsg}</p>
             </motion.div>
           )}
-        </AnimatePresence>
 
-        {/* Inline error (scan failed but camera still live) */}
-        {(stage === "live" || stage === "photo_preview") && errorMsg && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="bg-amber-500/20 border border-amber-500/30 rounded-xl px-4 py-2.5"
-          >
-            <p className="text-amber-200 text-xs text-center leading-relaxed">{errorMsg}</p>
-          </motion.div>
-        )}
+          {/* MANUAL INPUT */}
+          <AnimatePresence>
+            {showManual && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="flex gap-2 pt-1">
+                  <input
+                    type="text"
+                    value={manualText}
+                    onChange={e => setManualText(e.target.value)}
+                    placeholder='e.g. "Advil 200mg" or "Metformin 500mg tablet"'
+                    className="flex-1 h-12 px-4 rounded-2xl bg-white/10 text-white text-sm placeholder-white/35 border border-white/20 focus:outline-none focus:border-primary/70"
+                    data-testid="manual-label-input"
+                    autoFocus
+                    onKeyDown={e => {
+                      if (e.key === "Enter" && manualText.trim()) {
+                        onResult(parseTextLabel(manualText));
+                      }
+                    }}
+                  />
+                  <motion.button
+                    whileTap={{ scale: 0.88 }}
+                    onClick={() => manualText.trim() && onResult(parseTextLabel(manualText))}
+                    className="w-12 h-12 bg-primary rounded-2xl flex items-center justify-center text-primary-foreground flex-shrink-0"
+                    aria-label="Submit manual entry"
+                  >
+                    <CheckIcon size={18} />
+                  </motion.button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-        {/* Manual input */}
-        <AnimatePresence>
-          {showManual && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
+          {/* ACTION BUTTONS */}
+          <div className="flex gap-2">
+
+            {/* Type label — always available */}
+            <motion.button
+              whileTap={{ scale: 0.92 }}
+              onClick={() => setShowManual(v => !v)}
+              className="h-14 px-4 rounded-2xl bg-white/10 text-white text-xs font-semibold border border-white/20 backdrop-blur flex-shrink-0"
+              data-testid="manual-entry-btn"
             >
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={manualInput}
-                  onChange={e => setManualInput(e.target.value)}
-                  placeholder='e.g. "Advil 200mg" or "Lisinopril 10mg tablet"'
-                  className="flex-1 h-12 px-4 rounded-2xl bg-white/10 text-white text-sm placeholder-white/40 border border-white/20 focus:outline-none focus:border-primary/60"
-                  data-testid="manual-label-input"
-                  autoFocus
-                  onKeyDown={e => e.key === "Enter" && handleManualParse()}
-                />
+              Type Label
+            </motion.button>
+
+            {/* Pick Photo — always available, no HTTPS required */}
+            <motion.button
+              whileTap={{ scale: 0.92 }}
+              onClick={() => fileInputRef.current?.click()}
+              className="h-14 px-4 rounded-2xl bg-white/10 text-white text-xs font-semibold border border-white/20 backdrop-blur flex-shrink-0 flex items-center gap-1.5"
+              data-testid="pick-photo-btn"
+            >
+              <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <rect x="1" y="3" width="13" height="10" rx="1.5"/>
+                <circle cx="7.5" cy="8" r="2.5"/>
+                <path d="M5 3l1.2-2h3.6L11 3"/>
+              </svg>
+              Pick Photo
+            </motion.button>
+
+            {/* Scan live camera */}
+            {stage === "live" && (
+              <motion.button
+                whileTap={{ scale: 0.94 }}
+                onClick={scanLive}
+                className="flex-1 h-14 rounded-2xl bg-primary text-primary-foreground font-bold text-sm flex items-center justify-center gap-2 shadow-xl"
+                data-testid="capture-btn"
+              >
+                <ScanIcon size={18} />
+                Scan Label
+              </motion.button>
+            )}
+
+            {/* Scan result actions */}
+            {stage === "result" && (
+              <>
                 <motion.button
-                  whileTap={{ scale: 0.88 }}
-                  onClick={handleManualParse}
-                  className="w-12 h-12 bg-primary rounded-2xl flex items-center justify-center text-primary-foreground flex-shrink-0"
+                  whileTap={{ scale: 0.92 }}
+                  onClick={tryAgain}
+                  className="h-14 px-4 rounded-2xl bg-white/10 text-white text-xs font-semibold border border-white/20 flex-shrink-0"
+                  data-testid="scan-again-btn"
+                >
+                  Try Again
+                </motion.button>
+                <motion.button
+                  whileTap={{ scale: 0.92 }}
+                  onClick={confirmResult}
+                  className="flex-1 h-14 rounded-2xl bg-primary text-primary-foreground font-bold flex items-center justify-center gap-2 shadow-xl"
+                  data-testid="confirm-scan-btn"
                 >
                   <CheckIcon size={18} />
+                  Use This
                 </motion.button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+              </>
+            )}
+          </div>
 
-        {/* Action buttons */}
-        <div className="flex gap-2">
+          {/* Contextual hint */}
+          <p className="text-white/30 text-[11px] text-center select-none">
+            {stage === "live"         && "Point label at frame · Scan Label · or Pick Photo from library"}
+            {stage === "photo_chosen" && "Photo loading…"}
+            {stage === "scanning"     && "Reading label with AI…"}
+            {stage === "result"       && scanResult && "Tap Use This to add this medication"}
+            {stage === "cam_error"    && "Pick Photo works without camera access"}
+          </p>
 
-          {/* Type label — always visible */}
-          <motion.button
-            whileTap={{ scale: 0.92 }}
-            onClick={() => setShowManual(v => !v)}
-            className="h-14 px-4 rounded-2xl bg-white/10 text-white text-xs font-semibold border border-white/20 backdrop-blur-sm flex-shrink-0"
-            data-testid="manual-entry-btn"
-          >
-            Type Label
-          </motion.button>
-
-          {/* Pick a Photo — always visible, works without camera/HTTPS */}
-          <motion.button
-            whileTap={{ scale: 0.92 }}
-            onClick={() => fileInputRef.current?.click()}
-            className="h-14 px-4 rounded-2xl bg-white/10 text-white text-xs font-semibold border border-white/20 backdrop-blur-sm flex-shrink-0 flex items-center gap-1.5"
-            data-testid="pick-photo-btn"
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-              <rect x="1" y="3" width="12" height="9" rx="1.5"/>
-              <circle cx="7" cy="7.5" r="2"/>
-              <path d="M4.5 3L5.5 1h3l1 2"/>
-            </svg>
-            Pick Photo
-          </motion.button>
-
-          {/* Main action button */}
-          {stage === "live" && (
-            <motion.button
-              whileTap={{ scale: 0.94 }}
-              onClick={captureAndScan}
-              className="flex-1 h-14 rounded-2xl bg-primary text-primary-foreground font-bold text-sm flex items-center justify-center gap-2 shadow-lg"
-              data-testid="capture-btn"
-            >
-              <ScanIcon size={18} />
-              Scan Label
-            </motion.button>
-          )}
-
-          {stage === "photo_preview" && !isScanning && (
-            <motion.button
-              whileTap={{ scale: 0.94 }}
-              onClick={scanPhotoPreview}
-              className="flex-1 h-14 rounded-2xl bg-primary text-primary-foreground font-bold text-sm flex items-center justify-center gap-2 shadow-lg"
-              data-testid="scan-photo-btn"
-            >
-              <ScanIcon size={18} />
-              Scan This Photo
-            </motion.button>
-          )}
-
-          {stage === "done" && (
-            <>
-              <motion.button
-                whileTap={{ scale: 0.92 }}
-                onClick={rescan}
-                className="h-14 px-4 rounded-2xl bg-white/10 text-white text-xs font-semibold border border-white/20 flex-shrink-0"
-                data-testid="scan-again-btn"
-              >
-                Try Again
-              </motion.button>
-              <motion.button
-                whileTap={{ scale: 0.92 }}
-                onClick={confirmResult}
-                className="flex-1 h-14 rounded-2xl bg-primary text-primary-foreground font-bold flex items-center justify-center gap-2"
-                data-testid="confirm-scan-btn"
-              >
-                <CheckIcon size={18} />
-                Use This
-              </motion.button>
-            </>
-          )}
         </div>
-
-        {/* Hint */}
-        <p className="text-white/30 text-[11px] text-center">
-          {stage === "live" && "Point at the label and tap Scan Label · or Pick Photo to scan from your library"}
-          {stage === "photo_preview" && "Photo selected · tap Scan This Photo to identify"}
-          {stage === "done" && scanResult && "Tap Use This to fill in your medication"}
-          {stage === "error" && "Use Pick Photo to scan from your photo library"}
-        </p>
       </div>
     </motion.div>
   );
