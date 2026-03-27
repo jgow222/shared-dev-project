@@ -1,9 +1,9 @@
 // Supabase Edge Function: scan-medication
 // Accepts a base64 image of a medication label/bottle
-// Uses Claude Vision (claude-3-5-sonnet) to identify the medication
+// Uses Claude Vision to identify the medication
 // Returns: { name, strength, unit, form, brand, confidence }
 
-import Anthropic from "npm:@anthropic-ai/sdk@0.36.3";
+import Anthropic from "npm:@anthropic-ai/sdk@0.80.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -36,9 +36,19 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { image } = await req.json() as { image: string };
+    let body: { image?: string };
+    try {
+      body = await req.json();
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
-    if (!image) {
+    const { image } = body;
+
+    if (!image || typeof image !== "string") {
       return new Response(JSON.stringify({ error: "No image provided" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -53,47 +63,54 @@ Deno.serve(async (req) => {
       });
     }
 
-    const client = new Anthropic({ apiKey });
-
-    // Strip data URL prefix if present
-    // Supports: "data:image/jpeg;base64,..." or raw base64
+    // Strip data URL prefix — supports "data:image/jpeg;base64,..." or raw base64
     let base64Data = image;
     let mediaType: "image/jpeg" | "image/png" | "image/webp" | "image/gif" = "image/jpeg";
 
     if (image.startsWith("data:")) {
-      const matches = image.match(/^data:(image\/[^;]+);base64,(.+)$/);
+      const matches = image.match(/^data:(image\/[^;]+);base64,(.+)$/s);
       if (matches) {
-        const mimeType = matches[1] as typeof mediaType;
+        const mimeType = matches[1];
         if (["image/jpeg", "image/png", "image/webp", "image/gif"].includes(mimeType)) {
-          mediaType = mimeType;
+          mediaType = mimeType as typeof mediaType;
         }
         base64Data = matches[2];
       }
     }
 
-    const prompt = `You are a pharmaceutical expert assistant analyzing a medication bottle or package label photo.
+    // Validate we actually have base64 data
+    if (!base64Data || base64Data.length < 100) {
+      return new Response(JSON.stringify({ error: "Image data too small or empty" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
-Your task: identify the medication in this image as precisely as possible.
+    const client = new Anthropic({ apiKey });
 
-Look for:
-1. Brand name (e.g. "Advil", "Tylenol", "Lipitor")  
-2. Generic name (e.g. "Ibuprofen", "Acetaminophen", "Atorvastatin")
-3. Strength/dose (e.g. "200mg", "500mg", "10mg/5mL")
-4. Form (Tablet, Capsule, Liquid, Gel Cap, Softgel, Chewable, Patch, Cream, etc.)
-5. Unit (mg, mcg, mL, IU, %, g)
+    const prompt = `You are a pharmaceutical expert analyzing a photo of a medication bottle, prescription label, supplement bottle, or drug packaging.
 
-Respond ONLY with a valid JSON object — no explanation, no markdown:
+Your task: identify exactly what medication or supplement is shown.
+
+Look carefully for:
+1. Brand name (e.g. "Advil", "Tylenol", "Lipitor", "NyQuil", "One A Day")
+2. Generic/active ingredient name (e.g. "Ibuprofen", "Acetaminophen", "Atorvastatin")
+3. Strength/dose number (e.g. "200", "500", "10")
+4. Unit (mg, mcg, mL, IU, g, %)
+5. Form (Tablet, Capsule, Liquid, Gel Cap, Softgel, Chewable, Patch, Cream, Inhaler, Gummy, etc.)
+
+Respond ONLY with a valid JSON object — no markdown, no explanation:
 {
-  "name": "generic drug name (preferred) or brand name if generic unknown",
+  "name": "generic drug name preferred, or brand name if generic unknown",
   "brand": "brand name if visible, else null",
-  "strength": "numeric value only (e.g. '200' not '200mg')",
-  "unit": "mg | mcg | mL | IU | g | %",
-  "form": "Tablet | Capsule | Liquid | Gel Cap | Softgel | Chewable | Patch | Cream | Inhaler | Drops | Injection | Other",
-  "confidence": "high | medium | low",
-  "raw_text": "any text you can read from the label (max 200 chars)"
+  "strength": "number only e.g. '200' not '200mg'",
+  "unit": "mg or mcg or mL or IU or g or %",
+  "form": "Tablet or Capsule or Liquid or Gel Cap or Softgel or Chewable or Patch or Cream or Inhaler or Gummy or Other",
+  "confidence": "high or medium or low",
+  "raw_text": "any text visible on label, max 150 chars"
 }
 
-If you cannot identify the medication at all, return:
+If you cannot identify any medication (e.g. the image is blurry, dark, or not a medication), return:
 {"error": "Could not identify medication", "confidence": "low"}`;
 
     const response = await client.messages.create({
@@ -122,15 +139,14 @@ If you cannot identify the medication at all, return:
 
     const rawText = response.content[0].type === "text" ? response.content[0].text : "";
 
-    // Parse JSON from Claude's response
+    // Parse JSON — handles backtick-wrapped responses from Claude
     let result: ScanResult = {};
     try {
-      // Extract JSON from response (handles cases where Claude adds backticks)
       const jsonMatch = rawText.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         result = JSON.parse(jsonMatch[0]);
       } else {
-        result = { error: "Could not parse response", confidence: "low" };
+        result = { error: "Could not parse AI response", confidence: "low" };
       }
     } catch {
       result = { error: "Invalid response format", confidence: "low" };
@@ -142,7 +158,7 @@ If you cannot identify the medication at all, return:
     });
 
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Unknown error";
+    const message = err instanceof Error ? err.message : String(err);
     console.error("scan-medication error:", message);
     return new Response(JSON.stringify({ error: message }), {
       status: 500,

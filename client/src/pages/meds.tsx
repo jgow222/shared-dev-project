@@ -486,7 +486,7 @@ async function scanMedicationWithAI(imageDataUrl: string): Promise<AIScanResult>
         "apikey": SUPABASE_ANON_KEY,
       },
       body: JSON.stringify({ image: imageDataUrl }),
-      signal: AbortSignal.timeout(20000), // 20s timeout for AI processing
+      signal: AbortSignal.timeout(35000), // 35s timeout — Claude vision can be slow on first cold start
     }
   );
 
@@ -520,6 +520,11 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
     }
 
     try {
+      // Check if camera API is available at all
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw Object.assign(new Error("Camera API not available"), { name: "NotSupportedError" });
+      }
+
       const constraints: MediaStreamConstraints = {
         video: {
           facingMode: { ideal: facingMode },
@@ -533,20 +538,43 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
       streamRef.current = stream;
 
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
+        const video = videoRef.current;
+        video.srcObject = stream;
+
+        // Wait for video to be ready before marking as live
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error("Video ready timeout")), 10000);
+          video.onloadedmetadata = () => {
+            clearTimeout(timeout);
+            resolve();
+          };
+          video.onerror = () => {
+            clearTimeout(timeout);
+            reject(new Error("Video element error"));
+          };
+        });
+
+        try {
+          await video.play();
+        } catch (playErr: any) {
+          // Some browsers throw AbortError when play() is interrupted — ignore it
+          if (playErr?.name !== "AbortError") throw playErr;
+        }
+
         setStage("live");
       }
     } catch (err: any) {
-      console.error("Camera error:", err);
+      console.error("Camera error:", err.name, err.message);
       if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-        setErrorMsg("Camera permission denied. Please allow camera access in your browser settings.");
-      } else if (err.name === "NotFoundError") {
+        setErrorMsg("Camera permission denied. Allow camera access in your browser settings, then tap Try Again.");
+      } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
         setErrorMsg("No camera found on this device.");
-      } else if (err.name === "NotReadableError") {
+      } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
         setErrorMsg("Camera is in use by another app. Close other camera apps and try again.");
+      } else if (err.name === "NotSupportedError" || err.name === "OverconstrainedError") {
+        setErrorMsg("Camera not supported on this browser. Try Chrome or Safari.");
       } else {
-        setErrorMsg("Couldn't start camera. Try the manual entry option below.");
+        setErrorMsg(`Camera error: ${err.message || "Unknown error"}. Try the Type Label button below.`);
       }
       setStage("error");
     }
@@ -564,19 +592,42 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
 
   const captureAndScan = async () => {
     if (!videoRef.current || !canvasRef.current) return;
-    setStage("scanning");
 
     const video = videoRef.current;
-    const canvas = canvasRef.current;
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
-    const ctx = canvas.getContext("2d");
-    if (ctx) {
-      ctx.drawImage(video, 0, 0);
+
+    // Make sure video actually has frames — readyState 4 = HAVE_ENOUGH_DATA
+    if (video.readyState < 2) {
+      setErrorMsg("Camera isn't ready yet. Wait a moment and try again.");
+      return;
     }
 
-    // Capture frame as JPEG (quality 0.85 — good balance of clarity vs size)
-    const imageDataUrl = canvas.toDataURL("image/jpeg", 0.85);
+    setStage("scanning");
+    setErrorMsg("");
+
+    const canvas = canvasRef.current;
+    const w = video.videoWidth || 1280;
+    const h = video.videoHeight || 720;
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      setStage("error");
+      setErrorMsg("Canvas not available. Try a different browser.");
+      return;
+    }
+    ctx.drawImage(video, 0, 0, w, h);
+
+    // Capture at full quality JPEG for best OCR results
+    const imageDataUrl = canvas.toDataURL("image/jpeg", 0.95);
+
+    // Sanity check — make sure we have actual data
+    if (imageDataUrl.length < 5000) {
+      setStage("done");
+      setScanResult({});
+      setErrorMsg("Could not capture image from camera. Try again or use Type Label.");
+      setShowManual(true);
+      return;
+    }
 
     try {
       const aiResult = await scanMedicationWithAI(imageDataUrl);
@@ -587,8 +638,8 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
         setScanResult({});
         setErrorMsg(
           aiResult.confidence === "low"
-            ? "Couldn't read the label clearly. Try better lighting or hold the bottle steady, then scan again."
-            : "Medication not identified. You can type the label text below."
+            ? "Label wasn't clear enough. Try better lighting, move closer, and scan again."
+            : "Medication not identified. Type the label text below."
         );
         setShowManual(true);
         return;
@@ -630,11 +681,17 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
       setShowManual(false);
 
     } catch (err: any) {
-      console.error("Camera scan error:", err);
-      // Network error or timeout — fall back gracefully
+      console.error("Camera scan error:", err?.name, err?.message);
       setStage("done");
       setScanResult({});
-      setErrorMsg("AI scan unavailable. Type the label text below to add your medication.");
+      // Give a specific error based on what went wrong
+      if (err?.name === "TimeoutError" || err?.message?.includes("timeout") || err?.message?.includes("Timeout")) {
+        setErrorMsg("Scan timed out — AI is warming up. Try again in a few seconds.");
+      } else if (err?.message?.includes("NetworkError") || err?.message?.includes("Failed to fetch")) {
+        setErrorMsg("No internet connection. Check your connection and try again.");
+      } else {
+        setErrorMsg("Scan failed. Make sure the label is well-lit and try again, or type it below.");
+      }
       setShowManual(true);
     }
   };
@@ -862,8 +919,25 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
             </motion.button>
           )}
 
+          {/* Scan Again button — shown when done (whether success or fail) */}
+          {stage === "done" && (
+            <motion.button
+              whileTap={{ scale: 0.92 }}
+              onClick={() => {
+                setScanResult(null);
+                setShowManual(false);
+                setErrorMsg("");
+                startCamera(cameraMode);
+              }}
+              className="flex-1 h-14 rounded-2xl bg-white/15 text-white text-sm font-semibold border border-white/25"
+              data-testid="scan-again-btn"
+            >
+              Scan Again
+            </motion.button>
+          )}
+
           {/* Confirm result button */}
-          {stage === "done" && scanResult && !showManual && (
+          {stage === "done" && scanResult && Object.values(scanResult).some(Boolean) && !showManual && (
             <motion.button
               whileTap={{ scale: 0.92 }}
               onClick={confirmResult}
@@ -879,7 +953,12 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
         {/* Hint text */}
         {stage === "live" && (
           <p className="text-white/50 text-xs text-center">
-            Point at the medication label and tap Scan, or type the label text
+            Point at the medication label and tap Scan
+          </p>
+        )}
+        {stage === "scanning" && (
+          <p className="text-white/50 text-xs text-center">
+            Hold steady… reading the label
           </p>
         )}
       </div>
@@ -1255,7 +1334,7 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
       </AnimatePresence>
 
       {/* ── STEP 0: What medication ─────────────────────────────────────────── */}
-      <AnimatePresence mode="wait">
+      <AnimatePresence>
         {(step === 0 || editMode) && (
           <motion.div
             key="step0"

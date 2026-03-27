@@ -772,6 +772,18 @@ async function searchOpenFDA(query: string, limit = 15): Promise<MedEntry[]> {
   }
 }
 
+// Routes we accept — things people actually take or apply as a medication
+const ACCEPTED_ROUTES = new Set([
+  "ORAL", "SUBLINGUAL", "BUCCAL", "TOPICAL", "TRANSDERMAL", "NASAL",
+  "INHALATION", "INTRAVENOUS", "INTRAMUSCULAR", "SUBCUTANEOUS",
+]);
+
+// Routes we exclude — not things someone would add as a personal medication
+const EXCLUDED_ROUTES = new Set([
+  "OPHTHALMIC", "OTIC", "RECTAL", "VAGINAL", "URETHRAL",
+  "DENTAL", "IRRIGATION", "UNKNOWN",
+]);
+
 function parseOpenFDAResults(data: any): MedEntry[] {
   const results: MedEntry[] = [];
   const seen = new Set<string>();
@@ -779,23 +791,44 @@ function parseOpenFDAResults(data: any): MedEntry[] {
   for (const item of (data?.results || [])) {
     const brandNames: string[] = item?.openfda?.brand_name || [];
     const genericNames: string[] = item?.openfda?.generic_name || [];
-    const routes: string[] = item?.openfda?.route || [];
+    const routes: string[] = (item?.openfda?.route || []).map((r: string) => r.toUpperCase());
+    const productTypes: string[] = item?.openfda?.product_type || [];
+
+    // Skip non-medication product types
+    const type = productTypes[0]?.toUpperCase() || "";
+    if (type === "ANIMAL DRUG" || type === "DIETARY SUPPLEMENT (NON-OTC)" ) continue;
+
+    // Skip if ALL routes are excluded (e.g. purely ophthalmic, otic, rectal)
+    if (routes.length > 0 && routes.every(r => EXCLUDED_ROUTES.has(r))) continue;
 
     const brandName = brandNames[0] || "";
     const genericName = genericNames[0] || "";
     const displayName = brandName || genericName;
     if (!displayName) continue;
 
-    // Parse strength from dosage_and_administration or description
+    // Skip obviously non-medication entries
+    const lowerName = displayName.toLowerCase();
+    if (
+      lowerName.includes("eye drop") ||
+      lowerName.includes("ear drop") ||
+      lowerName.includes("eye solution") ||
+      lowerName.includes("ophthalmic") ||
+      lowerName.includes("otic")
+    ) continue;
+
+    // Parse strength
     const strengthText = (item?.dosage_and_administration?.[0] || item?.description?.[0] || "");
     const strengthMatch = strengthText.match(/(\d+\.?\d*)\s*(mg|mcg|mL|IU|g|%)/i);
 
-    const formMap: Record<string, string> = {
-      ORAL: "Tablet", TOPICAL: "Cream", INTRAVENOUS: "Injection",
-      OPHTHALMIC: "Drops", NASAL: "Spray", INHALATION: "Inhaler",
-      RECTAL: "Suppository", TRANSDERMAL: "Patch",
+    const routeFormMap: Record<string, string> = {
+      ORAL: "Tablet", SUBLINGUAL: "Tablet", BUCCAL: "Tablet",
+      TOPICAL: "Cream", TRANSDERMAL: "Patch",
+      INTRAVENOUS: "Injection", INTRAMUSCULAR: "Injection", SUBCUTANEOUS: "Injection",
+      NASAL: "Spray", INHALATION: "Inhaler",
     };
-    const form = routes.map(r => formMap[r.toUpperCase()]).filter(Boolean)[0] || "Tablet";
+    // Use first accepted route for form
+    const acceptedRoute = routes.find(r => ACCEPTED_ROUTES.has(r));
+    const form = (acceptedRoute && routeFormMap[acceptedRoute]) || "Tablet";
 
     const key = `${displayName.toLowerCase()}|${strengthMatch?.[1] || ""}`;
     if (seen.has(key)) continue;
@@ -807,7 +840,7 @@ function parseOpenFDAResults(data: any): MedEntry[] {
       unit: strengthMatch ? strengthMatch[2].toLowerCase() : "mg",
       form,
       category: "otc",
-      aliases: brandName && genericName ? [genericName] : undefined,
+      aliases: brandName && genericName && brandName !== genericName ? [genericName] : undefined,
     });
   }
 
