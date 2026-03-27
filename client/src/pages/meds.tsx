@@ -2183,7 +2183,30 @@ function MedDetail({ med, onClose }: { med: Medication; onClose: () => void }) {
               {med.pill_count !== null && (
                 <div>
                   <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-1">Supply</p>
-                  <p className="text-sm">{med.pill_count} pills remaining</p>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className={`text-sm font-semibold ${
+                      med.pill_count <= 7 ? "text-destructive" :
+                      med.pill_count <= 14 ? "text-[hsl(var(--nurilo-alert-amber))]" :
+                      "text-foreground"
+                    }`}>
+                      {med.pill_count} remaining
+                      {med.pill_count <= 14 && " — running low"}
+                    </p>
+                    {med.pill_count <= 14 && (
+                      <a
+                        href={`https://www.goodrx.com/${encodeURIComponent(med.name.toLowerCase().replace(/\s+/g, "-"))}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-shrink-0 h-8 px-3 rounded-xl bg-primary text-primary-foreground text-xs font-bold flex items-center gap-1.5"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round">
+                          <circle cx="6" cy="4" r="2.5" />
+                          <path d="M6 1C3.79 1 2 2.79 2 5c0 2.63 4 7 4 7s4-4.37 4-7c0-2.21-1.79-4-4-4z" />
+                        </svg>
+                        Find Refill
+                      </a>
+                    )}
+                  </div>
                 </div>
               )}
               {med.purpose && (

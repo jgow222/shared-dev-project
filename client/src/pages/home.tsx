@@ -257,6 +257,7 @@ export default function HomePage() {
   const [showCompletion, setShowCompletion] = useState(false);
   const [showNameInput, setShowNameInput] = useState(false);
   const [nameInput, setNameInput] = useState("");
+  const [refillMed, setRefillMed] = useState<Medication | null>(null);
   const [, navigate] = useLocation();
 
   const today = new Date().toISOString().split("T")[0];
@@ -309,6 +310,11 @@ export default function HomePage() {
     if (oa !== ob) return oa - ob;
     return a.scheduled_time.localeCompare(b.scheduled_time);
   });
+
+  // Low supply: active meds with pill_count set and running low
+  const lowSupplyMeds = medications.filter(m =>
+    m.status === "active" && m.pill_count !== null && m.pill_count !== undefined && m.pill_count <= 14
+  );
 
   // Progress ring calculation
   const pct = totalCount > 0 ? takenCount / totalCount : 0;
@@ -434,34 +440,87 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* ── Today's Doses ── */}
-      <section>
-        <h2
-          className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-3"
-          data-testid="doses-section-label"
-        >
-          Today's Medications
-        </h2>
+      {/* ── Low Supply Warning ── */}
+      <AnimatePresence>
+        {lowSupplyMeds.length > 0 && (
+          <motion.section
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+          >
+            <h2 className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-2">
+              Running Low
+            </h2>
+            <div className="space-y-2">
+              {lowSupplyMeds.map(med => {
+                const critical = (med.pill_count ?? 0) <= 7;
+                return (
+                  <motion.div
+                    key={med.id}
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className={`flex items-center gap-3 rounded-2xl px-4 py-3 border ${
+                      critical
+                        ? "bg-destructive/8 border-destructive/20"
+                        : "bg-[hsl(var(--nurilo-alert-amber))]/8 border-[hsl(var(--nurilo-alert-amber))]/20"
+                    }`}
+                  >
+                    {/* Warning icon */}
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                      critical ? "bg-destructive/15" : "bg-[hsl(var(--nurilo-alert-amber))]/15"
+                    }`}>
+                      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"
+                        className={critical ? "text-destructive" : "text-[hsl(var(--nurilo-alert-amber))]"}>
+                        <path d="M9 2L16 15H2L9 2z" />
+                        <line x1="9" y1="8" x2="9" y2="11" />
+                        <circle cx="9" cy="13" r="0.5" fill="currentColor" stroke="none" />
+                      </svg>
+                    </div>
 
-        <motion.div
-          className="space-y-3"
-          variants={{ show: { transition: { staggerChildren: 0.05 } } }}
-          initial="hidden"
-          animate="show"
-        >
-          {sortedDoses.length === 0 ? (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="text-center py-12"
-              data-testid="no-doses"
-            >
-              <PillSVG className="mx-auto mb-3 text-muted-foreground/30" size={36} />
-              <p className="text-sm text-muted-foreground font-medium">No medications today</p>
-              <p className="text-xs text-muted-foreground/60 mt-1">Head to Meds to get started</p>
-            </motion.div>
-          ) : (
-            sortedDoses.map((dose) => (
+                    {/* Med info */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-foreground truncate">{med.name}</p>
+                      <p className={`text-xs font-semibold mt-0.5 ${
+                        critical ? "text-destructive" : "text-[hsl(var(--nurilo-alert-amber))]"
+                      }`}>
+                        {critical
+                          ? `Only ${med.pill_count} left — refill soon`
+                          : `${med.pill_count} remaining — getting low`}
+                      </p>
+                    </div>
+
+                    {/* Refill button */}
+                    <motion.button
+                      whileTap={{ scale: 0.92 }}
+                      onClick={() => setRefillMed(med)}
+                      className="flex-shrink-0 h-9 px-3.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold"
+                    >
+                      Find Refill
+                    </motion.button>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </motion.section>
+        )}
+      </AnimatePresence>
+
+      {/* ── Today's Doses — only shown when there are medications ── */}
+      {sortedDoses.length > 0 && (
+        <section>
+          <h2
+            className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-3"
+            data-testid="doses-section-label"
+          >
+            Today’s Medications
+          </h2>
+          <motion.div
+            className="space-y-3"
+            variants={{ show: { transition: { staggerChildren: 0.05 } } }}
+            initial="hidden"
+            animate="show"
+          >
+            {sortedDoses.map((dose) => (
               <DoseRow
                 key={dose.id}
                 dose={dose}
@@ -469,10 +528,10 @@ export default function HomePage() {
                 onConfirm={(id) => confirmDose.mutate(id)}
                 onSkip={(id) => skipDose.mutate(id)}
               />
-            ))
-          )}
-        </motion.div>
-      </section>
+            ))}
+          </motion.div>
+        </section>
+      )}
 
       {/* ── Daily Health Tip ── */}
       {todayTip && (
@@ -499,6 +558,157 @@ export default function HomePage() {
           </div>
         </motion.section>
       )}
+
+      {/* ── Refill Finder Sheet ── */}
+      <AnimatePresence>
+        {refillMed && (
+          <RefillFinderSheet med={refillMed} onClose={() => setRefillMed(null)} />
+        )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+/* ─── Refill Finder Sheet ───────────────────────────────────────────────────
+ * Slides up from the bottom. Shows options to find this med nearby:
+ *  - Google Maps pharmacy search (uses device location if granted)
+ *  - GoodRx price comparison
+ *  - RxSaver price comparison
+ *  - Amazon pharmacy
+ * No API key needed — all are simple deep-links that open in browser.
+ */
+function RefillFinderSheet({ med, onClose }: { med: Medication; onClose: () => void }) {
+  const medName = encodeURIComponent(med.name);
+  const medNameRaw = med.name;
+
+  // Build deep-link URLs
+  const links = [
+    {
+      label: "Nearby Pharmacies",
+      sublabel: "Google Maps — finds CVS, Walgreens, and more near you",
+      icon: (
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="11" cy="9" r="4" />
+          <path d="M11 2C7.13 2 4 5.13 4 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
+        </svg>
+      ),
+      url: `https://www.google.com/maps/search/pharmacy+near+me/${medName}`,
+      color: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+    },
+    {
+      label: "GoodRx — Compare Prices",
+      sublabel: "Find the lowest price at pharmacies near you",
+      icon: (
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 11h18M3 7h18M3 15h10" />
+          <circle cx="17" cy="15" r="3" />
+          <path d="M15.5 13.5L17 15l2-2" />
+        </svg>
+      ),
+      url: `https://www.goodrx.com/${med.name.toLowerCase().replace(/\s+/g, "-")}`,
+      color: "bg-green-500/10 text-green-600 dark:text-green-400",
+    },
+    {
+      label: "RxSaver — Lowest Price",
+      sublabel: "Compare prices at pharmacies nearby",
+      icon: (
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="5" width="16" height="14" rx="2" />
+          <path d="M7 5V3M15 5V3" />
+          <path d="M8 12l2.5 2.5L14 10" />
+        </svg>
+      ),
+      url: `https://www.rxsaver.retailmenot.com/search?q=${medName}`,
+      color: "bg-primary/10 text-primary",
+    },
+    {
+      label: "Amazon Pharmacy",
+      sublabel: "Free 2-day delivery with Prime",
+      icon: (
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 16s3-1 8-1 8 1 8 1" strokeLinecap="round" />
+          <path d="M5 12c-1.1-2.9 0-6 2.5-7.5A7 7 0 0 1 17 8c1 3 0 6-2 8" />
+          <path d="M10 6v6l3 2" />
+        </svg>
+      ),
+      url: `https://pharmacy.amazon.com/search?q=${medName}`,
+      color: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    },
+  ];
+
+  return (
+    <>
+      {/* Backdrop */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-[60] bg-black/50"
+        onClick={onClose}
+      />
+
+      {/* Sheet */}
+      <motion.div
+        initial={{ opacity: 0, y: 80 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 80 }}
+        transition={{ type: "spring", damping: 30, stiffness: 320 }}
+        className="fixed bottom-0 left-0 right-0 z-[70] bg-card rounded-t-3xl pt-5 px-5 pb-[88px] space-y-4"
+      >
+        {/* Pull bar */}
+        <div className="w-10 h-1 bg-border rounded-full mx-auto" />
+
+        {/* Header */}
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="font-bold text-base">Find {medNameRaw}</p>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              {med.pill_count !== null ? `${med.pill_count} remaining — ` : ""}
+              Find the best price near you
+            </p>
+          </div>
+          <motion.button
+            whileTap={{ scale: 0.88 }}
+            onClick={onClose}
+            className="w-9 h-9 rounded-xl bg-secondary flex items-center justify-center text-muted-foreground"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+              <line x1="4" y1="4" x2="12" y2="12" />
+              <line x1="12" y1="4" x2="4" y2="12" />
+            </svg>
+          </motion.button>
+        </div>
+
+        {/* Options */}
+        <div className="space-y-2">
+          {links.map(link => (
+            <motion.a
+              key={link.label}
+              href={link.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              whileTap={{ scale: 0.97 }}
+              className="flex items-center gap-4 p-4 rounded-2xl bg-secondary/50 border border-border active:bg-secondary"
+            >
+              <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${link.color}`}>
+                {link.icon}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-foreground">{link.label}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{link.sublabel}</p>
+              </div>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" className="text-muted-foreground flex-shrink-0">
+                <path d="M6 3l5 5-5 5" />
+              </svg>
+            </motion.a>
+          ))}
+        </div>
+
+        {/* Disclaimer */}
+        <p className="text-[11px] text-muted-foreground text-center leading-relaxed">
+          Prices and availability vary by location. Always verify with your pharmacist.
+        </p>
+      </motion.div>
+    </>
   );
 }
