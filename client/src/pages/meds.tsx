@@ -1395,7 +1395,6 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
   const [name, setName]               = useState(med?.name || "");
   const [doseStrength, setDoseStrength] = useState(med?.dose_strength || "");
   const [doseUnit, setDoseUnit]       = useState(med?.dose_unit || "mg");
-  const [dosesPerDay, setDosesPerDay] = useState<string>("1"); // customizable amount per day
   const [form, setForm]               = useState(med?.form || "Tablet");
   const [frequency, setFrequency]     = useState(med?.frequency || "Once daily");
   const [times, setTimes]             = useState<string[]>(
@@ -1454,9 +1453,7 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
     setFrequency(opt.label);
     if (opt.times === 0) {
       setTimes([]);
-      setDosesPerDay("0");
     } else {
-      setDosesPerDay(String(opt.times));
       const defaults = ["08:00", "12:00", "18:00", "21:00", "06:00", "10:00", "14:00", "22:00"];
       const current = times.slice(0, opt.times);
       const needed = opt.times - current.length;
@@ -1639,85 +1636,26 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
               </div>
             </div>
 
-            {/* ── AMOUNT PER DAY (customizable) ────────────── */}
-            <div className="space-y-3">
-              <label className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">
-                How many per day?
-              </label>
-              {/* Quick tap presets */}
-              <div className="grid grid-cols-4 gap-2">
-                {["1", "2", "3", "4"].map(n => (
-                  <motion.button
-                    key={n}
-                    whileTap={{ scale: 0.92 }}
-                    onClick={() => {
-                      setDosesPerDay(n);
-                      const count = parseInt(n);
-                      const defaults = ["08:00", "12:00", "18:00", "21:00"];
-                      const curr = times.slice(0, count);
-                      const needed = count - curr.length;
-                      setTimes([...curr, ...defaults.slice(curr.length, curr.length + needed)]);
-                    }}
-                    className={`h-16 rounded-xl text-2xl font-black transition-colors flex flex-col items-center justify-center gap-0.5 ${
-                      dosesPerDay === n
-                        ? "bg-primary text-primary-foreground shadow-sm"
-                        : "bg-card border border-border text-foreground"
-                    }`}
-                    data-testid={`doses-per-day-${n}`}
-                  >
-                    <span>{n}</span>
-                    <span className="text-[9px] font-semibold opacity-60">{n === "1" ? "once" : n === "2" ? "twice" : `${n}×`}</span>
-                  </motion.button>
-                ))}
-              </div>
-              {/* Custom input for 5+ */}
-              <div className="flex items-center gap-3">
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min="1"
-                  max="20"
-                  value={!["1","2","3","4"].includes(dosesPerDay) ? dosesPerDay : ""}
-                  onChange={e => {
-                    const v = e.target.value;
-                    if (!v) return;
-                    setDosesPerDay(v);
-                    const count = parseInt(v);
-                    if (!isNaN(count) && count > 0 && count <= 12) {
-                      const defaults = ["08:00","06:00","12:00","18:00","21:00","03:00","09:00","15:00","22:00","04:00","10:00","16:00"];
-                      const curr = times.slice(0, count);
-                      const needed = count - curr.length;
-                      setTimes([...curr, ...defaults.slice(curr.length, curr.length + needed)]);
-                    }
-                  }}
-                  placeholder="Custom (5, 6…)"
-                  className="flex-1 h-12 px-4 rounded-xl border border-dashed border-border bg-card text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                  data-testid="custom-doses-per-day"
-                />
-                <p className="text-xs text-muted-foreground font-semibold whitespace-nowrap">times / day</p>
-              </div>
-            </div>
-
-            {/* ── FORM (with icons) ────────────────────────── */}
+            {/* ── FORM (type) ──────────────────────────────── */}
             <div className="space-y-3">
               <label className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">
                 Type
               </label>
-              <div className="grid grid-cols-3 gap-2.5">
-                {FORM_OPTIONS.map(f => (
+              <div className="grid grid-cols-2 gap-2.5">
+                {["Tablet", "Capsule", "Liquid", "Softgel", "Patch", "Other"].map(f => (
                   <motion.button
                     key={f}
                     whileTap={{ scale: 0.92 }}
                     onClick={() => setForm(f)}
-                    className={`h-20 rounded-2xl transition-colors border flex flex-col items-center justify-center gap-2 px-1 ${
+                    className={`h-16 rounded-2xl transition-colors border flex items-center justify-center gap-2.5 px-3 ${
                       form === f
                         ? "bg-primary text-primary-foreground border-primary shadow-sm"
                         : "bg-card border-border text-muted-foreground"
                     }`}
                     data-testid={`form-${f}`}
                   >
-                    <FormIcon name={f} size={26} />
-                    <span className="text-[11px] font-bold leading-none text-center">{f}</span>
+                    <FormIcon name={f} size={24} />
+                    <span className="text-sm font-bold">{f}</span>
                   </motion.button>
                 ))}
               </div>
@@ -1729,7 +1667,7 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
                 Frequency
               </label>
               <div className="grid grid-cols-2 gap-2.5">
-                {FREQUENCY_OPTIONS.map(opt => (
+                {FREQUENCY_OPTIONS.filter(o => o.label !== "Specific days").map(opt => (
                   <motion.button
                     key={opt.label}
                     whileTap={{ scale: 0.92 }}
@@ -1750,6 +1688,20 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
                   </motion.button>
                 ))}
               </div>
+              {/* Specific days — full width outlined button */}
+              <motion.button
+                whileTap={{ scale: 0.92 }}
+                onClick={() => handleFrequencySelect({ label: "Specific days", times: 1, emoji: "Cal" })}
+                className={`w-full h-12 rounded-2xl transition-colors border flex items-center justify-center gap-2.5 ${
+                  frequency === "Specific days"
+                    ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                    : "bg-card border-border text-foreground"
+                }`}
+                data-testid="freq-Specific-days"
+              >
+                <FreqIcon label="Specific days" />
+                <span className="text-sm font-bold">Specific days</span>
+              </motion.button>
             </div>
 
 
@@ -1796,7 +1748,6 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
                         const defaults = ["08:00","12:00","18:00","21:00","06:00","10:00","14:00","22:00"];
                         const next = defaults.find(t => !times.includes(t)) || "08:00";
                         setTimes([...times, next]);
-                        setDosesPerDay(String(times.length + 1));
                       }}
                       className="flex items-center gap-1.5 text-xs font-bold text-primary bg-primary/10 px-3 py-1.5 rounded-full"
                       data-testid="add-time-btn"
@@ -1819,7 +1770,6 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
                       index={i}
                       onRemove={times.length > 1 ? () => {
                         setTimes(times.filter((_, idx) => idx !== i));
-                        setDosesPerDay(String(times.length - 1));
                       } : undefined}
                     />
                   ))}
@@ -1832,7 +1782,7 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
                 <p className="text-sm text-muted-foreground">Take as needed — no set times</p>
                 <motion.button
                   whileTap={{ scale: 0.92 }}
-                  onClick={() => { setTimes(["08:00"]); setDosesPerDay("1"); }}
+                  onClick={() => { setTimes(["08:00"]); }}
                   className="mt-2 text-xs text-primary font-bold"
                   data-testid="add-first-time-btn"
                 >
@@ -1861,6 +1811,27 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
                     className="overflow-hidden"
                   >
                     <div className="px-4 pb-4 space-y-4 border-t border-border pt-4">
+                      {/* Less common form types */}
+                      <div>
+                        <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Other form types</label>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {["Cream", "Inhaler", "Gummy", "Injection", "Drops"].map(f => (
+                            <motion.button
+                              key={f}
+                              whileTap={{ scale: 0.92 }}
+                              onClick={() => setForm(f)}
+                              className={`h-9 px-4 rounded-xl text-sm font-semibold transition-colors ${
+                                form === f
+                                  ? "bg-primary text-primary-foreground"
+                                  : "bg-card border border-border text-muted-foreground"
+                              }`}
+                              data-testid={`form-${f}`}
+                            >
+                              {f}
+                            </motion.button>
+                          ))}
+                        </div>
+                      </div>
                       <div>
                         <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
                           What it's for
@@ -1944,26 +1915,12 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
 // ─── MedCard ─────────────────────────────────────────────────────────────────
 
 function MedCard({ med, onEdit, onDetail }: { med: Medication; onEdit: () => void; onDetail: () => void }) {
-  const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const refillBadge = getRefillBadge(med.pill_count);
 
   const deleteMed = useMutation({
     mutationFn: async () => { await api.deleteMedication(med.id); },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["medications"] }); setShowMenu(false); },
-  });
-
-  const togglePause = useMutation({
-    mutationFn: async () => {
-      const newStatus = med.status === "paused" ? "active" : "paused";
-      await api.updateMedication(med.id, { status: newStatus });
-    },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["medications"] }); setShowMenu(false); },
-  });
-
-  const archiveMed = useMutation({
-    mutationFn: async () => { await api.updateMedication(med.id, { status: "archived" }); },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["medications"] }); setShowMenu(false); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["medications"] }); },
   });
 
   const times: string[] = JSON.parse(med.schedule_times);
@@ -1986,13 +1943,13 @@ function MedCard({ med, onEdit, onDetail }: { med: Medication; onEdit: () => voi
             : "bg-primary"
       }`} />
 
-      <div className="pl-5 pr-4 py-4">
+      {/* Top row: icon + med info (full width) */}
+      <div className="pl-5 pr-4 py-4 cursor-pointer" onClick={onDetail}>
         <div className="flex items-start gap-3">
           <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
             <CapsuleIcon size={20} />
           </div>
-
-          <div className="flex-1 min-w-0 cursor-pointer" onClick={onDetail}>
+          <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="font-semibold text-sm leading-snug tracking-tight" data-testid={`med-name-${med.id}`}>
                 {med.name}
@@ -2029,27 +1986,29 @@ function MedCard({ med, onEdit, onDetail }: { med: Medication; onEdit: () => voi
               </span>
             )}
           </div>
-
-          {/* Visible Edit + Delete buttons — no hidden menu */}
-          <div className="flex items-center gap-1.5">
-            <motion.button
-              whileTap={{ scale: 0.88 }}
-              onClick={onEdit}
-              className="flex items-center gap-1.5 px-3 h-8 rounded-lg bg-secondary text-foreground text-xs font-semibold"
-              data-testid={`edit-med-${med.id}`}
-            >
-              <EditIcon size={12} /> Edit
-            </motion.button>
-            <motion.button
-              whileTap={{ scale: 0.88 }}
-              onClick={() => setShowDeleteConfirm(true)}
-              className="flex items-center gap-1.5 px-3 h-8 rounded-lg bg-destructive/10 text-destructive text-xs font-semibold"
-              data-testid={`delete-med-${med.id}`}
-            >
-              <TrashIcon size={12} /> Remove
-            </motion.button>
-          </div>
         </div>
+      </div>
+
+      {/* Bottom row: Edit | Remove */}
+      <div className="h-px bg-border" />
+      <div className="flex">
+        <motion.button
+          whileTap={{ scale: 0.92 }}
+          onClick={onEdit}
+          className="bg-transparent text-foreground border-r border-border h-10 flex-1 text-sm font-semibold flex items-center justify-center gap-1.5"
+          data-testid={`edit-med-${med.id}`}
+        >
+          <EditIcon size={12} /> Edit
+        </motion.button>
+        <div className="w-px bg-border" />
+        <motion.button
+          whileTap={{ scale: 0.92 }}
+          onClick={() => setShowDeleteConfirm(true)}
+          className="bg-transparent text-destructive h-10 flex-1 text-sm font-semibold flex items-center justify-center gap-1.5"
+          data-testid={`delete-med-${med.id}`}
+        >
+          <TrashIcon size={12} /> Remove
+        </motion.button>
       </div>
 
       {/* Delete confirmation bottom sheet */}
@@ -2068,7 +2027,7 @@ function MedCard({ med, onEdit, onDetail }: { med: Medication; onEdit: () => voi
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 60 }}
               transition={{ type: "spring", damping: 28, stiffness: 300 }}
-              className="fixed bottom-0 left-0 right-0 z-50 bg-card rounded-t-3xl p-6 space-y-4"
+              className="fixed bottom-0 left-0 right-0 z-50 bg-card rounded-t-3xl p-6 pb-8 space-y-4"
             >
               <div className="w-10 h-1 bg-border rounded-full mx-auto" />
               <div className="flex items-start gap-3">
@@ -2138,7 +2097,8 @@ function getMedInfo(name: string) {
 }
 
 function MedDetail({ med, onClose }: { med: Medication; onClose: () => void }) {
-  const [activeTab, setActiveTab] = useState<"overview" | "history" | "info" | "interactions">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "history" | "info">("overview");
+  const [showInteractions, setShowInteractions] = useState(false);
   const times: string[] = JSON.parse(med.schedule_times);
 
   const { data: doseHistory = [] } = useQuery<DoseLog[]>({
@@ -2209,55 +2169,165 @@ function MedDetail({ med, onClose }: { med: Medication; onClose: () => void }) {
 
       {/* Tabs */}
       <div className="flex gap-1 bg-secondary rounded-xl p-1">
-        {(["overview", "history", "info", "interactions"] as const).map(tab => (
+        {(["overview", "history", "info"] as const).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`flex-1 py-2 text-[11px] font-semibold rounded-lg transition-all ${
+            className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
               activeTab === tab ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"
             }`}
             data-testid={`tab-${tab}`}
           >
-            {tab === "interactions" ? "Interact." : tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
       </div>
 
-      {activeTab === "overview" && (
-        <div className="bg-card rounded-xl border border-border p-5 space-y-4">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-1">Schedule</p>
-            <p className="text-sm">
-              {med.frequency}
-              {times.length > 0 && ` · ${times.map(formatTime).join(",  ")}`}
-            </p>
+      {activeTab === "overview" && (() => {
+        // Interactions logic (inline in Overview)
+        type Severity = "danger" | "caution" | "safe";
+        interface InteractionRule {
+          drug1: string[];
+          drug2: string[];
+          severity: Severity;
+          reason: string;
+        }
+        const INTERACTION_RULES: InteractionRule[] = [
+          { drug1: ["warfarin"], drug2: ["ibuprofen","aspirin","naproxen"], severity: "danger", reason: "NSAIDs significantly increase bleeding risk with blood thinners like Warfarin." },
+          { drug1: ["warfarin"], drug2: ["sertraline","fluoxetine","paroxetine"], severity: "danger", reason: "SSRIs increase the anticoagulant effect of Warfarin, significantly raising bleeding risk." },
+          { drug1: ["lisinopril","losartan"], drug2: ["ibuprofen","naproxen"], severity: "caution", reason: "NSAIDs can reduce the blood pressure-lowering effect of this medication and may affect kidney function." },
+          { drug1: ["metformin"], drug2: ["alcohol"], severity: "caution", reason: "Heavy alcohol use with Metformin increases the rare but serious risk of lactic acidosis." },
+          { drug1: ["atorvastatin","simvastatin","rosuvastatin"], drug2: ["grapefruit"], severity: "caution", reason: "Grapefruit juice increases statin blood levels, which may increase the risk of muscle pain or liver issues." },
+          { drug1: ["levothyroxine"], drug2: ["calcium","iron","antacid"], severity: "caution", reason: "Calcium, iron, and antacids interfere with levothyroxine absorption. Take them at least 4 hours apart." },
+          { drug1: ["sertraline","fluoxetine"], drug2: ["tramadol"], severity: "danger", reason: "This combination can cause serotonin syndrome — a potentially serious condition." },
+          { drug1: ["amlodipine","lisinopril","metoprolol"], drug2: ["lisinopril","amlodipine","metoprolol","losartan"], severity: "safe", reason: "This combination is commonly used together to manage blood pressure and is generally safe when monitored." },
+        ];
+
+        const found: { other: Medication; severity: Severity; reason: string }[] = [];
+        const seen = new Set<string>();
+        for (const other of otherActiveMeds) {
+          const thisLower = med.name.toLowerCase();
+          const otherLower = other.name.toLowerCase();
+          const key = [med.id, other.id].sort().join("-");
+          if (seen.has(key)) continue;
+          seen.add(key);
+          for (const rule of INTERACTION_RULES) {
+            const thisMatches = rule.drug1.some(d => thisLower.includes(d) || d.includes(thisLower.split(" ")[0]));
+            const otherMatches = rule.drug2.some(d => otherLower.includes(d) || d.includes(otherLower.split(" ")[0]));
+            const reversedThis = rule.drug2.some(d => thisLower.includes(d) || d.includes(thisLower.split(" ")[0]));
+            const reversedOther = rule.drug1.some(d => otherLower.includes(d) || d.includes(otherLower.split(" ")[0]));
+            if ((thisMatches && otherMatches) || (reversedThis && reversedOther)) {
+              found.push({ other, severity: rule.severity, reason: rule.reason });
+              break;
+            }
+          }
+        }
+
+        const dangerCount = found.filter(f => f.severity === "danger").length;
+        const cautionCount = found.filter(f => f.severity === "caution").length;
+
+        return (
+          <div className="space-y-3">
+            <div className="bg-card rounded-xl border border-border p-5 space-y-4">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-1">Schedule</p>
+                <p className="text-sm">
+                  {med.frequency}
+                  {times.length > 0 && ` · ${times.map(formatTime).join(",  ")}`}
+                </p>
+              </div>
+              {med.pill_count !== null && (
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-1">Supply</p>
+                  <p className="text-sm">{med.pill_count} pills remaining</p>
+                </div>
+              )}
+              {med.purpose && (
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-1">Purpose</p>
+                  <p className="text-sm">{med.purpose}</p>
+                </div>
+              )}
+              {med.doctor && (
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-1">Prescriber</p>
+                  <p className="text-sm">{med.doctor}</p>
+                </div>
+              )}
+              {med.pharmacy && (
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-1">Pharmacy</p>
+                  <p className="text-sm">{med.pharmacy}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Interactions card */}
+            <motion.button
+              whileTap={{ scale: 0.92 }}
+              onClick={() => setShowInteractions(v => !v)}
+              className={`w-full rounded-2xl border p-4 flex items-center gap-3 text-left ${
+                dangerCount > 0
+                  ? "bg-destructive/10 border-destructive/20"
+                  : cautionCount > 0
+                  ? "bg-[hsl(var(--nurilo-alert-amber))]/10 border-[hsl(var(--nurilo-alert-amber))]/20"
+                  : "bg-[hsl(var(--nurilo-success))]/10 border-[hsl(var(--nurilo-success))]/20"
+              }`}
+              data-testid="interactions-card"
+            >
+              <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                dangerCount > 0 ? "bg-destructive/20 text-destructive"
+                : cautionCount > 0 ? "bg-[hsl(var(--nurilo-alert-amber))]/20 text-[hsl(var(--nurilo-alert-amber))]"
+                : "bg-[hsl(var(--nurilo-success))]/20 text-[hsl(var(--nurilo-success))]"
+              }`}>
+                {found.length === 0 ? <CheckIcon size={16} /> : <WarnIcon size={16} />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold">
+                  {found.length === 0 ? "No interactions found" : `${found.length} interaction${found.length > 1 ? "s" : ""} flagged`}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {found.length === 0 ? `Checked against ${otherActiveMeds.length} medication${otherActiveMeds.length !== 1 ? "s" : ""}` : "Tap to see details"}
+                </p>
+              </div>
+              <ChevronRightIcon size={14} />
+            </motion.button>
+
+            {/* Expanded interactions list */}
+            <AnimatePresence>
+              {showInteractions && found.length > 0 && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden space-y-2"
+                >
+                  {found.map(({ other, severity, reason }) => (
+                    <div
+                      key={other.id}
+                      className={`rounded-2xl border p-4 space-y-1.5 ${
+                        severity === "danger"
+                          ? "bg-destructive/10 border-destructive/20"
+                          : severity === "caution"
+                          ? "bg-[hsl(var(--nurilo-alert-amber))]/10 border-[hsl(var(--nurilo-alert-amber))]/20"
+                          : "bg-[hsl(var(--nurilo-success))]/10 border-[hsl(var(--nurilo-success))]/20"
+                      }`}
+                    >
+                      <p className="text-sm font-bold">{med.name} + {other.name}</p>
+                      <p className="text-xs leading-relaxed text-muted-foreground">{reason}</p>
+                    </div>
+                  ))}
+                  <div className="bg-secondary rounded-2xl px-4 py-3">
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      This is not medical advice. Always consult your doctor or pharmacist.
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
-          {med.pill_count !== null && (
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-1">Supply</p>
-              <p className="text-sm">{med.pill_count} pills remaining</p>
-            </div>
-          )}
-          {med.purpose && (
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-1">Purpose</p>
-              <p className="text-sm">{med.purpose}</p>
-            </div>
-          )}
-          {med.doctor && (
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-1">Prescriber</p>
-              <p className="text-sm">{med.doctor}</p>
-            </div>
-          )}
-          {med.pharmacy && (
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground mb-1">Pharmacy</p>
-              <p className="text-sm">{med.pharmacy}</p>
-            </div>
-          )}
-        </div>
-      )}
+        );
+      })()}
 
       {activeTab === "history" && (
         <div className="space-y-4">
@@ -2317,14 +2387,14 @@ function MedDetail({ med, onClose }: { med: Medication; onClose: () => void }) {
             {info ? (
               <>
                 {([
-                  { label: "What it's used for", icon: "💊", text: info.uses },
-                  { label: "Common side effects", icon: "⚠️", text: info.sideEffects },
-                  { label: "Tips for taking it", icon: "✅", text: info.tips },
-                  { label: "Storage", icon: "🗄️", text: info.storage },
-                ] as const).map(({ label, icon, text }) => (
+                  { label: "What it's used for", text: info.uses },
+                  { label: "Common side effects", text: info.sideEffects },
+                  { label: "Tips for taking it", text: info.tips },
+                  { label: "Storage", text: info.storage },
+                ] as const).map(({ label, text }) => (
                   <div key={label} className="bg-card rounded-2xl border border-border p-4 space-y-1.5">
-                    <p className="text-[11px] font-black uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
-                      <span>{icon}</span> {label}
+                    <p className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">
+                      {label}
                     </p>
                     <p className="text-sm leading-relaxed text-foreground">{text}</p>
                   </div>
@@ -2347,103 +2417,6 @@ function MedDetail({ med, onClose }: { med: Medication; onClose: () => void }) {
         );
       })()}
 
-      {activeTab === "interactions" && (() => {
-        const activeMeds = otherActiveMeds;
-
-        // Comprehensive interaction pairs database
-        type Severity = "danger" | "caution" | "safe";
-        interface InteractionRule {
-          drug1: string[];
-          drug2: string[];
-          severity: Severity;
-          reason: string;
-        }
-        const INTERACTION_RULES: InteractionRule[] = [
-          { drug1: ["warfarin"], drug2: ["ibuprofen","aspirin","naproxen"], severity: "danger", reason: "NSAIDs significantly increase bleeding risk with blood thinners like Warfarin. This combination is generally avoided without close medical supervision." },
-          { drug1: ["warfarin"], drug2: ["sertraline","fluoxetine","paroxetine"], severity: "danger", reason: "SSRIs increase the anticoagulant effect of Warfarin, significantly raising bleeding risk." },
-          { drug1: ["lisinopril","losartan"], drug2: ["ibuprofen","naproxen"], severity: "caution", reason: "NSAIDs can reduce the blood pressure-lowering effect of this medication and may affect kidney function. Short-term use is often OK — check with your doctor." },
-          { drug1: ["metformin"], drug2: ["alcohol"], severity: "caution", reason: "Heavy alcohol use with Metformin increases the rare but serious risk of lactic acidosis. Occasional moderate drinking is generally acceptable." },
-          { drug1: ["atorvastatin","simvastatin","rosuvastatin"], drug2: ["grapefruit"], severity: "caution", reason: "Grapefruit juice increases statin blood levels, which may increase the risk of muscle pain or liver issues." },
-          { drug1: ["levothyroxine"], drug2: ["calcium","iron","antacid"], severity: "caution", reason: "Calcium, iron, and antacids interfere with levothyroxine absorption. Take them at least 4 hours apart." },
-          { drug1: ["sertraline","fluoxetine"], drug2: ["tramadol"], severity: "danger", reason: "This combination can cause serotonin syndrome — a potentially serious condition causing agitation, rapid heart rate, and high blood pressure." },
-          { drug1: ["amlodipine","lisinopril","metoprolol"], drug2: ["lisinopril","amlodipine","metoprolol","losartan"], severity: "safe", reason: "This combination is commonly used together to manage blood pressure and is generally safe when monitored by a doctor." },
-        ];
-
-        const found: { other: Medication; severity: Severity; reason: string }[] = [];
-        const seen = new Set<string>();
-
-        for (const other of activeMeds) {
-          const thisLower = med.name.toLowerCase();
-          const otherLower = other.name.toLowerCase();
-          const key = [med.id, other.id].sort().join("-");
-          if (seen.has(key)) continue;
-          seen.add(key);
-
-          for (const rule of INTERACTION_RULES) {
-            const thisMatches = rule.drug1.some(d => thisLower.includes(d) || d.includes(thisLower.split(" ")[0]));
-            const otherMatches = rule.drug2.some(d => otherLower.includes(d) || d.includes(otherLower.split(" ")[0]));
-            const reversedThis = rule.drug2.some(d => thisLower.includes(d) || d.includes(thisLower.split(" ")[0]));
-            const reversedOther = rule.drug1.some(d => otherLower.includes(d) || d.includes(otherLower.split(" ")[0]));
-
-            if ((thisMatches && otherMatches) || (reversedThis && reversedOther)) {
-              found.push({ other, severity: rule.severity, reason: rule.reason });
-              break;
-            }
-          }
-        }
-
-        const severityConfig = {
-          danger:  { label: "Use with Caution", bg: "bg-destructive/10", border: "border-destructive/20", text: "text-destructive", dot: "bg-destructive", icon: "⚠️" },
-          caution: { label: "Moderate Interaction", bg: "bg-amber-50 dark:bg-amber-950/30", border: "border-amber-200 dark:border-amber-800", text: "text-amber-700 dark:text-amber-400", dot: "bg-amber-500", icon: "⚡" },
-          safe:    { label: "Generally Compatible", bg: "bg-green-50 dark:bg-green-950/30", border: "border-green-200 dark:border-green-800", text: "text-green-700 dark:text-green-400", dot: "bg-green-500", icon: "✓" },
-        };
-
-        return (
-          <div className="space-y-3">
-            <div className="bg-card rounded-2xl border border-border p-4">
-              <p className="text-sm font-semibold">Checking {med.name} against {activeMeds.length} other medication{activeMeds.length !== 1 ? "s" : ""}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Flagged combinations based on general guidelines</p>
-            </div>
-
-            {found.length === 0 && activeMeds.length > 0 && (
-              <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-2xl p-4 flex items-start gap-3">
-                <span className="text-lg">✅</span>
-                <div>
-                  <p className="text-sm font-bold text-green-700 dark:text-green-400">No known interactions found</p>
-                  <p className="text-xs text-green-600 dark:text-green-500 mt-0.5 leading-relaxed">No common interactions detected with your other medications. This doesn't mean there are none — always confirm with your pharmacist.</p>
-                </div>
-              </div>
-            )}
-
-            {found.length === 0 && activeMeds.length === 0 && (
-              <div className="bg-card rounded-2xl border border-border p-4">
-                <p className="text-sm text-muted-foreground">Add more medications to check for interactions between them.</p>
-              </div>
-            )}
-
-            {found.map(({ other, severity, reason }) => {
-              const cfg = severityConfig[severity];
-              return (
-                <div key={other.id} className={`${cfg.bg} ${cfg.border} border rounded-2xl p-4 space-y-2`}>
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${cfg.dot}`} />
-                    <p className={`text-[11px] font-black uppercase tracking-widest ${cfg.text}`}>{cfg.label}</p>
-                  </div>
-                  <p className="text-sm font-bold">{med.name} + {other.name}</p>
-                  <p className="text-sm leading-relaxed text-foreground/80">{reason}</p>
-                </div>
-              );
-            })}
-
-            {/* Disclaimer */}
-            <div className="bg-secondary rounded-2xl px-4 py-3">
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                <span className="font-bold">This is not medical advice.</span> Interaction checks are for general awareness only. Always consult your doctor or pharmacist before starting, stopping, or changing any medication.
-              </p>
-            </div>
-          </div>
-        );
-      })()}
     </motion.div>
   );
 }
