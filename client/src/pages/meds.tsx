@@ -482,6 +482,15 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
   useEffect(() => {
     isMountedRef.current = true;
     openCamera("environment");
+
+    // Warmup ping: wake the Supabase edge function immediately so it's ready
+    // by the time the user taps Scan. Edge functions have a ~10-30s cold start.
+    fetch(`${SUPABASE_URL}/functions/v1/scan-medication`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SUPABASE_ANON_KEY}`, "apikey": SUPABASE_ANON_KEY },
+      body: JSON.stringify({ image: "warmup" }),
+    }).catch(() => {}); // fire-and-forget, ignore response
+
     return () => {
       isMountedRef.current = false;
       stopStream();
