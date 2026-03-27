@@ -97,7 +97,7 @@ If you cannot identify the medication at all, return:
 {"error": "Could not identify medication", "confidence": "low"}`;
 
     const response = await client.messages.create({
-      model: "claude-3-5-sonnet-latest",
+      model: "claude-sonnet-4-5-20250929",
       max_tokens: 512,
       messages: [
         {

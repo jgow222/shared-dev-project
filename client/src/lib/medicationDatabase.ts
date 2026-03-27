@@ -553,18 +553,16 @@ const DATABASE: MedEntry[] = [
   { name: "Phenazopyridine", form: "Tablet", strength: "200", unit: "mg", category: "rx", aliases: ["Pyridium"] },
 ];
 
-// ── Fuzzy Search Engine ────────────────────────────────────────────────────────
+
+// ── Search Engine ─────────────────────────────────────────────────────────────
+// Local fuzzy search + RxNorm + OpenFDA — always searches external APIs
+// Brand names are first-class: searching "Advil" returns "Advil (Ibuprofen)" entries
 
 function normalize(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-// Build a deduplicated name list for display (one entry per unique name)
-const uniqueNames = Array.from(
-  new Map(DATABASE.map(e => [e.name.toLowerCase(), e])).values()
-);
-
-export function searchMedications(query: string, limit = 8): MedEntry[] {
+export function searchMedications(query: string, limit = 20): MedEntry[] {
   if (!query || query.trim().length === 0) return [];
 
   const q = normalize(query);
@@ -580,37 +578,27 @@ export function searchMedications(query: string, limit = 8): MedEntry[] {
 
     // Exact starts-with on name = highest score
     if (nameLower.startsWith(q)) {
-      score = 1000 - nameLower.length; // shorter = better match
+      score = 1000 - nameLower.length;
     }
-    // Contains match
+    // Contains match on name
     else if (nameLower.includes(q)) {
       score = 500;
     }
-    // Check aliases
+    // Check aliases (brand names like "Advil", "Tylenol", "NyQuil")
     else if (entry.aliases) {
       for (const alias of entry.aliases) {
         const aliasNorm = normalize(alias);
-        if (aliasNorm.startsWith(q)) {
-          score = 400;
+        if (aliasNorm === q) {
+          score = 950; // exact alias match = almost as good as exact name
+          break;
+        } else if (aliasNorm.startsWith(q)) {
+          score = 800;
           break;
         } else if (aliasNorm.includes(q)) {
-          score = 200;
+          score = 400;
           break;
         }
       }
-    }
-    // Fuzzy: check if all chars of query appear in sequence
-    else {
-      let pos = 0;
-      let matched = 0;
-      for (const char of q) {
-        const found = nameLower.indexOf(char, pos);
-        if (found !== -1) {
-          matched++;
-          pos = found + 1;
-        }
-      }
-      if (matched === q.length) score = 50;
     }
 
     if (score > 0) {
@@ -625,7 +613,7 @@ export function searchMedications(query: string, limit = 8): MedEntry[] {
     .map(r => r.entry);
 }
 
-// Get first match by exact name (for camera scan auto-fill)
+// Get first match by exact name or alias (for camera scan auto-fill)
 export function getMedByName(name: string): MedEntry | undefined {
   const lower = name.toLowerCase().trim();
   return DATABASE.find(e =>
@@ -634,63 +622,55 @@ export function getMedByName(name: string): MedEntry | undefined {
   );
 }
 
-// ─── RxNorm Live Search (Public API — no auth required) ───────────────────────
-// Calls https://rxnav.nlm.nih.gov/REST/drugs.json?name=QUERY
-// Returns up to 20 results from the full US drug database (~100,000 entries)
-// Used as live fallback when local DB has < 3 results
+// ─── External Drug APIs ────────────────────────────────────────────────────────
+// 1. RxNorm: https://rxnav.nlm.nih.gov — ~100,000 US drugs, free, no auth
+// 2. OpenFDA: https://api.fda.gov/drug — brand name search, millions of entries
+// Both are always queried in parallel — results merged and deduplicated
 
 export interface RxNormEntry extends MedEntry {
   rxcui?: string;
 }
 
-// Parse a single RxNorm concept group into MedEntry objects
 function parseRxNormGroup(conceptGroup: any): RxNormEntry[] {
   if (!conceptGroup?.conceptProperties) return [];
   const results: RxNormEntry[] = [];
 
   for (const prop of conceptGroup.conceptProperties) {
     const synonym = prop.synonym || prop.name || "";
-    // e.g. "Ibuprofen 200 MG Oral Tablet"
-    // Try to parse name, strength, unit, form from synonym string
     const strengthMatch = synonym.match(/(\d+\.?\d*)\s*(MG|MCG|ML|IU|G|%|MEQ)/i);
     const formMatch = synonym.match(/(Tablet|Capsule|Liquid|Solution|Suspension|Injection|Patch|Cream|Gel|Inhaler|Aerosol|Spray|Drops|Powder|Chewable|Softgel|Lozenge)/i);
-    const namePart = synonym.split(/\d/)[0].trim().replace(/\s+$/, "");
+    const namePart = (prop.name || synonym.split(/\d/)[0]).trim();
 
     if (!namePart) continue;
 
-    const entry: RxNormEntry = {
-      name: prop.name || namePart,
+    results.push({
+      name: namePart,
       strength: strengthMatch ? strengthMatch[1] : "",
-      unit: strengthMatch ? strengthMatch[2].toLowerCase().replace("mcg", "mcg").replace("iu", "IU").replace("meq", "mEq") : "mg",
+      unit: strengthMatch
+        ? strengthMatch[2].toLowerCase()
+            .replace("mcg", "mcg")
+            .replace("iu", "IU")
+            .replace("meq", "mEq")
+        : "mg",
       form: formMatch ? formMatch[1] : "Tablet",
       category: "rx",
       rxcui: prop.rxcui,
-    };
-
-    // Normalize unit capitalization
-    if (entry.unit === "mg" || entry.unit === "ml" || entry.unit === "g") {
-      entry.unit = entry.unit; // already lowercase is fine
-    }
-
-    results.push(entry);
+    });
   }
 
   return results;
 }
 
-// Search RxNorm API — returns deduplicated entries sorted by relevance
-export async function searchRxNorm(query: string, limit = 15): Promise<RxNormEntry[]> {
+// Search RxNorm by name — returns up to `limit` deduplicated results
+export async function searchRxNorm(query: string, limit = 20): Promise<RxNormEntry[]> {
   if (!query || query.trim().length < 2) return [];
 
   try {
     const q = encodeURIComponent(query.trim());
-
-    // Primary: exact drug search
-    const url = `https://rxnav.nlm.nih.gov/REST/drugs.json?name=${q}`;
-    const res = await fetch(url, {
-      headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(4000),
-    });
+    const res = await fetch(
+      `https://rxnav.nlm.nih.gov/REST/drugs.json?name=${q}`,
+      { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(5000) }
+    );
 
     if (!res.ok) throw new Error(`RxNorm HTTP ${res.status}`);
     const data = await res.json();
@@ -705,34 +685,35 @@ export async function searchRxNorm(query: string, limit = 15): Promise<RxNormEnt
 
     // If no results, try spelling suggestions
     if (rawResults.length === 0) {
-      const spellRes = await fetch(
-        `https://rxnav.nlm.nih.gov/REST/spellingsuggestions.json?name=${q}`,
-        { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(3000) }
-      );
-      if (spellRes.ok) {
-        const spellData = await spellRes.json();
-        const suggestions: string[] = spellData?.suggestionGroup?.suggestionList?.suggestion || [];
-        if (suggestions.length > 0) {
-          // Fetch results for first suggestion
-          const corrected = encodeURIComponent(suggestions[0]);
-          const corrRes = await fetch(
-            `https://rxnav.nlm.nih.gov/REST/drugs.json?name=${corrected}`,
-            { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(4000) }
-          );
-          if (corrRes.ok) {
-            const corrData = await corrRes.json();
-            const corrGroups = corrData?.drugGroup?.conceptGroup;
-            if (Array.isArray(corrGroups)) {
-              for (const group of corrGroups) {
-                rawResults.push(...parseRxNormGroup(group));
+      try {
+        const spellRes = await fetch(
+          `https://rxnav.nlm.nih.gov/REST/spellingsuggestions.json?name=${q}`,
+          { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(3000) }
+        );
+        if (spellRes.ok) {
+          const spellData = await spellRes.json();
+          const suggestions: string[] = spellData?.suggestionGroup?.suggestionList?.suggestion || [];
+          if (suggestions.length > 0) {
+            const corrected = encodeURIComponent(suggestions[0]);
+            const corrRes = await fetch(
+              `https://rxnav.nlm.nih.gov/REST/drugs.json?name=${corrected}`,
+              { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(4000) }
+            );
+            if (corrRes.ok) {
+              const corrData = await corrRes.json();
+              const corrGroups = corrData?.drugGroup?.conceptGroup;
+              if (Array.isArray(corrGroups)) {
+                for (const group of corrGroups) {
+                  rawResults.push(...parseRxNormGroup(group));
+                }
               }
             }
           }
         }
-      }
+      } catch { /* spelling suggestion failure is non-fatal */ }
     }
 
-    // Deduplicate by name+strength combination
+    // Deduplicate
     const seen = new Set<string>();
     const unique: RxNormEntry[] = [];
     for (const entry of rawResults) {
@@ -743,7 +724,6 @@ export async function searchRxNorm(query: string, limit = 15): Promise<RxNormEnt
       }
     }
 
-    // Sort: entries with strength info first, then alphabetically
     return unique
       .sort((a, b) => {
         const aHasStrength = a.strength ? 1 : 0;
@@ -752,34 +732,125 @@ export async function searchRxNorm(query: string, limit = 15): Promise<RxNormEnt
         return a.name.localeCompare(b.name);
       })
       .slice(0, limit);
-
   } catch (err) {
     console.warn("RxNorm search failed:", err);
     return [];
   }
 }
 
-// Combined search: local DB first, RxNorm fallback if < 3 local results
-// Returns a Promise so MedSearchInput can await it
+// Search OpenFDA brand name database
+// Catches OTC brand names like "NyQuil", "DayQuil", "Tylenol PM", etc.
+async function searchOpenFDA(query: string, limit = 15): Promise<MedEntry[]> {
+  if (!query || query.trim().length < 2) return [];
+
+  try {
+    const q = encodeURIComponent(query.trim());
+    // Use wildcard suffix search — matches NyQuil, NyQuil Severe, NyQuil Kids, etc.
+    const url = `https://api.fda.gov/drug/label.json?search=openfda.brand_name:${q}*&limit=${limit}`;
+    const res = await fetch(url, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!res.ok) {
+      // Fallback: try generic name search too
+      const url2 = `https://api.fda.gov/drug/label.json?search=openfda.generic_name:${q}*&limit=${limit}`;
+      const res2 = await fetch(url2, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!res2.ok) return [];
+      const data2 = await res2.json();
+      return parseOpenFDAResults(data2);
+    }
+
+    const data = await res.json();
+    return parseOpenFDAResults(data);
+  } catch (err) {
+    console.warn("OpenFDA search failed:", err);
+    return [];
+  }
+}
+
+function parseOpenFDAResults(data: any): MedEntry[] {
+  const results: MedEntry[] = [];
+  const seen = new Set<string>();
+
+  for (const item of (data?.results || [])) {
+    const brandNames: string[] = item?.openfda?.brand_name || [];
+    const genericNames: string[] = item?.openfda?.generic_name || [];
+    const routes: string[] = item?.openfda?.route || [];
+
+    const brandName = brandNames[0] || "";
+    const genericName = genericNames[0] || "";
+    const displayName = brandName || genericName;
+    if (!displayName) continue;
+
+    // Parse strength from dosage_and_administration or description
+    const strengthText = (item?.dosage_and_administration?.[0] || item?.description?.[0] || "");
+    const strengthMatch = strengthText.match(/(\d+\.?\d*)\s*(mg|mcg|mL|IU|g|%)/i);
+
+    const formMap: Record<string, string> = {
+      ORAL: "Tablet", TOPICAL: "Cream", INTRAVENOUS: "Injection",
+      OPHTHALMIC: "Drops", NASAL: "Spray", INHALATION: "Inhaler",
+      RECTAL: "Suppository", TRANSDERMAL: "Patch",
+    };
+    const form = routes.map(r => formMap[r.toUpperCase()]).filter(Boolean)[0] || "Tablet";
+
+    const key = `${displayName.toLowerCase()}|${strengthMatch?.[1] || ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    results.push({
+      name: displayName,
+      strength: strengthMatch ? strengthMatch[1] : "",
+      unit: strengthMatch ? strengthMatch[2].toLowerCase() : "mg",
+      form,
+      category: "otc",
+      aliases: brandName && genericName ? [genericName] : undefined,
+    });
+  }
+
+  return results;
+}
+
+// ─── Combined Search (always queries ALL sources) ─────────────────────────────
+// Local DB (instant) + RxNorm + OpenFDA (parallel async)
+// This is what MedSearchInput calls.
+// Returns a Promise — local results come first, then external results merge in.
+
 export async function searchMedicationsWithFallback(
   query: string,
-  limit = 12
+  limit = 20
 ): Promise<MedEntry[]> {
+  if (!query || query.trim().length === 0) return [];
+
+  // 1. Local results (instant)
   const localResults = searchMedications(query, limit);
 
-  // If local has enough results, don't bother calling RxNorm
-  if (localResults.length >= 3) return localResults;
+  // 2. Always query external APIs — don't skip even if local has results
+  // Run RxNorm + OpenFDA in parallel
+  const [rxResults, fdaResults] = await Promise.allSettled([
+    searchRxNorm(query, limit),
+    searchOpenFDA(query, limit),
+  ]);
 
-  // Otherwise merge with RxNorm results
-  try {
-    const rxResults = await searchRxNorm(query, limit - localResults.length);
+  const externalResults: MedEntry[] = [
+    ...(rxResults.status === "fulfilled" ? rxResults.value : []),
+    ...(fdaResults.status === "fulfilled" ? fdaResults.value : []),
+  ];
 
-    // Filter out RxNorm results that duplicate local results
-    const localNames = new Set(localResults.map(r => r.name.toLowerCase()));
-    const filtered = rxResults.filter(r => !localNames.has(r.name.toLowerCase()));
+  // 3. Merge: local results first, then external — deduplicate by normalized name
+  const seen = new Set<string>(localResults.map(r => normalize(r.name)));
+  const merged: MedEntry[] = [...localResults];
 
-    return [...localResults, ...filtered].slice(0, limit);
-  } catch {
-    return localResults;
+  for (const entry of externalResults) {
+    const key = normalize(entry.name);
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(entry);
+    }
   }
+
+  return merged.slice(0, limit);
 }

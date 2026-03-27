@@ -899,6 +899,7 @@ interface MedSearchProps {
 function MedSearchInput({ value, onChange, onSelect, onOpenCamera }: MedSearchProps) {
   const [results, setResults] = useState<MedEntry[]>([]);
   const [open, setOpen] = useState(false);
+  const [searching, setSearching] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Track the current search query to cancel stale results
@@ -908,24 +909,28 @@ function MedSearchInput({ value, onChange, onSelect, onOpenCamera }: MedSearchPr
     if (value.trim().length === 0) {
       setResults([]);
       setOpen(false);
+      setSearching(false);
       return;
     }
 
-    // Show local results immediately (synchronous, no flicker)
-    const localHits = searchMedications(value, 12);
+    // Show local results immediately (instant, no flicker)
+    const localHits = searchMedications(value, 20);
     setResults(localHits);
     setOpen(true);
+    setSearching(true);
 
-    // Then try RxNorm in background for extended results
+    // Always query external APIs (RxNorm + OpenFDA) regardless of local hit count
     const version = ++searchVersionRef.current;
-    searchMedicationsWithFallback(value, 12).then(allHits => {
-      // Only apply if this is still the latest query
+    searchMedicationsWithFallback(value, 20).then(allHits => {
       if (version === searchVersionRef.current) {
         setResults(allHits);
         setOpen(allHits.length > 0);
+        setSearching(false);
       }
     }).catch(() => {
-      // RxNorm failed — keep local results
+      if (version === searchVersionRef.current) {
+        setSearching(false);
+      }
     });
   }, [value]);
 
@@ -979,18 +984,18 @@ function MedSearchInput({ value, onChange, onSelect, onOpenCamera }: MedSearchPr
 
       {/* Dropdown */}
       <AnimatePresence>
-        {open && results.length > 0 && (
+        {open && (results.length > 0 || searching) && (
           <motion.div
             initial={{ opacity: 0, y: -6, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.97 }}
             transition={{ duration: 0.15 }}
-            className="absolute left-0 right-0 top-[calc(100%+6px)] z-40 bg-card border border-border rounded-2xl shadow-lg overflow-hidden"
+            className="absolute left-0 right-0 top-[calc(100%+6px)] z-40 bg-card border border-border rounded-2xl shadow-lg overflow-hidden max-h-80 overflow-y-auto"
             data-testid="med-autocomplete-dropdown"
           >
             {results.map((entry, i) => (
               <motion.button
-                key={`${entry.name}-${entry.strength}-${i}`}
+                key={`${entry.name}-${entry.strength}-${entry.form}-${i}`}
                 whileTap={{ scale: 0.98 }}
                 onClick={() => {
                   onSelect(entry);
@@ -1004,13 +1009,26 @@ function MedSearchInput({ value, onChange, onSelect, onOpenCamera }: MedSearchPr
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-foreground truncate">{entry.name}</p>
-                  <p className="text-xs text-muted-foreground">{entry.strength} {entry.unit} · {entry.form}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {[entry.aliases?.[0], entry.strength ? `${entry.strength} ${entry.unit}` : null, entry.form]
+                      .filter(Boolean).join(" · ")}
+                  </p>
                 </div>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${categoryColors[entry.category]}`}>
                   {categoryLabel[entry.category]}
                 </span>
               </motion.button>
             ))}
+            {/* Loading indicator while external APIs are fetching */}
+            {searching && (
+              <div className="px-4 py-2.5 flex items-center gap-2 text-xs text-muted-foreground border-t border-border">
+                <svg className="animate-spin h-3 w-3 text-primary" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                </svg>
+                Searching all medications…
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
