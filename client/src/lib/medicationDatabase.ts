@@ -633,3 +633,153 @@ export function getMedByName(name: string): MedEntry | undefined {
     (e.aliases?.some(a => a.toLowerCase() === lower))
   );
 }
+
+// ─── RxNorm Live Search (Public API — no auth required) ───────────────────────
+// Calls https://rxnav.nlm.nih.gov/REST/drugs.json?name=QUERY
+// Returns up to 20 results from the full US drug database (~100,000 entries)
+// Used as live fallback when local DB has < 3 results
+
+export interface RxNormEntry extends MedEntry {
+  rxcui?: string;
+}
+
+// Parse a single RxNorm concept group into MedEntry objects
+function parseRxNormGroup(conceptGroup: any): RxNormEntry[] {
+  if (!conceptGroup?.conceptProperties) return [];
+  const results: RxNormEntry[] = [];
+
+  for (const prop of conceptGroup.conceptProperties) {
+    const synonym = prop.synonym || prop.name || "";
+    // e.g. "Ibuprofen 200 MG Oral Tablet"
+    // Try to parse name, strength, unit, form from synonym string
+    const strengthMatch = synonym.match(/(\d+\.?\d*)\s*(MG|MCG|ML|IU|G|%|MEQ)/i);
+    const formMatch = synonym.match(/(Tablet|Capsule|Liquid|Solution|Suspension|Injection|Patch|Cream|Gel|Inhaler|Aerosol|Spray|Drops|Powder|Chewable|Softgel|Lozenge)/i);
+    const namePart = synonym.split(/\d/)[0].trim().replace(/\s+$/, "");
+
+    if (!namePart) continue;
+
+    const entry: RxNormEntry = {
+      name: prop.name || namePart,
+      strength: strengthMatch ? strengthMatch[1] : "",
+      unit: strengthMatch ? strengthMatch[2].toLowerCase().replace("mcg", "mcg").replace("iu", "IU").replace("meq", "mEq") : "mg",
+      form: formMatch ? formMatch[1] : "Tablet",
+      category: "rx",
+      rxcui: prop.rxcui,
+    };
+
+    // Normalize unit capitalization
+    if (entry.unit === "mg" || entry.unit === "ml" || entry.unit === "g") {
+      entry.unit = entry.unit; // already lowercase is fine
+    }
+
+    results.push(entry);
+  }
+
+  return results;
+}
+
+// Search RxNorm API — returns deduplicated entries sorted by relevance
+export async function searchRxNorm(query: string, limit = 15): Promise<RxNormEntry[]> {
+  if (!query || query.trim().length < 2) return [];
+
+  try {
+    const q = encodeURIComponent(query.trim());
+
+    // Primary: exact drug search
+    const url = `https://rxnav.nlm.nih.gov/REST/drugs.json?name=${q}`;
+    const res = await fetch(url, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(4000),
+    });
+
+    if (!res.ok) throw new Error(`RxNorm HTTP ${res.status}`);
+    const data = await res.json();
+
+    const rawResults: RxNormEntry[] = [];
+    const drugGroup = data?.drugGroup?.conceptGroup;
+    if (Array.isArray(drugGroup)) {
+      for (const group of drugGroup) {
+        rawResults.push(...parseRxNormGroup(group));
+      }
+    }
+
+    // If no results, try spelling suggestions
+    if (rawResults.length === 0) {
+      const spellRes = await fetch(
+        `https://rxnav.nlm.nih.gov/REST/spellingsuggestions.json?name=${q}`,
+        { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(3000) }
+      );
+      if (spellRes.ok) {
+        const spellData = await spellRes.json();
+        const suggestions: string[] = spellData?.suggestionGroup?.suggestionList?.suggestion || [];
+        if (suggestions.length > 0) {
+          // Fetch results for first suggestion
+          const corrected = encodeURIComponent(suggestions[0]);
+          const corrRes = await fetch(
+            `https://rxnav.nlm.nih.gov/REST/drugs.json?name=${corrected}`,
+            { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(4000) }
+          );
+          if (corrRes.ok) {
+            const corrData = await corrRes.json();
+            const corrGroups = corrData?.drugGroup?.conceptGroup;
+            if (Array.isArray(corrGroups)) {
+              for (const group of corrGroups) {
+                rawResults.push(...parseRxNormGroup(group));
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Deduplicate by name+strength combination
+    const seen = new Set<string>();
+    const unique: RxNormEntry[] = [];
+    for (const entry of rawResults) {
+      const key = `${entry.name.toLowerCase()}|${entry.strength}|${entry.unit}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(entry);
+      }
+    }
+
+    // Sort: entries with strength info first, then alphabetically
+    return unique
+      .sort((a, b) => {
+        const aHasStrength = a.strength ? 1 : 0;
+        const bHasStrength = b.strength ? 1 : 0;
+        if (bHasStrength !== aHasStrength) return bHasStrength - aHasStrength;
+        return a.name.localeCompare(b.name);
+      })
+      .slice(0, limit);
+
+  } catch (err) {
+    console.warn("RxNorm search failed:", err);
+    return [];
+  }
+}
+
+// Combined search: local DB first, RxNorm fallback if < 3 local results
+// Returns a Promise so MedSearchInput can await it
+export async function searchMedicationsWithFallback(
+  query: string,
+  limit = 12
+): Promise<MedEntry[]> {
+  const localResults = searchMedications(query, limit);
+
+  // If local has enough results, don't bother calling RxNorm
+  if (localResults.length >= 3) return localResults;
+
+  // Otherwise merge with RxNorm results
+  try {
+    const rxResults = await searchRxNorm(query, limit - localResults.length);
+
+    // Filter out RxNorm results that duplicate local results
+    const localNames = new Set(localResults.map(r => r.name.toLowerCase()));
+    const filtered = rxResults.filter(r => !localNames.has(r.name.toLowerCase()));
+
+    return [...localResults, ...filtered].slice(0, limit);
+  } catch {
+    return localResults;
+  }
+}

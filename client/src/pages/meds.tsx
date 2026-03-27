@@ -4,7 +4,7 @@ import * as api from "@/lib/api";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { Medication, DoseLog } from "@shared/schema";
-import { searchMedications, getMedByName } from "@/lib/medicationDatabase";
+import { searchMedications, getMedByName, searchMedicationsWithFallback } from "@/lib/medicationDatabase";
 import type { MedEntry } from "@/lib/medicationDatabase";
 
 // ─── Custom SVG Icons (NO Lucide) ─────────────────────────────────────────────
@@ -157,9 +157,9 @@ function CheckIcon({ size = 18 }: { size?: number }) {
   );
 }
 
-function ScanIcon({ size = 20 }: { size?: number }) {
+function ScanIcon({ size = 20, className }: { size?: number; className?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className={className}>
       <path d="M3 7V5a2 2 0 0 1 2-2h2" />
       <path d="M17 3h2a2 2 0 0 1 2 2v2" />
       <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
@@ -457,17 +457,45 @@ function parseMedicationLabel(text: string): Partial<{ name: string; strength: s
   return result;
 }
 
-// Simulated OCR — performs smart label simulation since no server-side OCR is available
-// In production this would use a real OCR API or ML model
-function simulateOCRScan(): Promise<string> {
-  return new Promise((resolve) => {
-    // Simulate processing time
-    setTimeout(() => {
-      // Return a realistic label fragment for demo purposes
-      // In a real deployment, this would be the actual OCR result from the camera frame
-      resolve("");
-    }, 1500);
-  });
+// ─── AI-powered medication scanner via Supabase Edge Function ─────────────────
+// Sends a base64 JPEG frame to Claude Vision (via Supabase edge function)
+// Returns structured medication data: { name, strength, unit, form, brand, confidence }
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://vytsmfnzaidhpopbleqr.supabase.co";
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5dHNtZm56YWlkaHBvcGJsZXFyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzOTIwNTMsImV4cCI6MjA4OTk2ODA1M30.Ff0mTzjIeXLNqkBmW5Sv16C9_YkANhqs6QqIINS_ARA";
+
+interface AIScanResult {
+  name?: string;
+  strength?: string;
+  unit?: string;
+  form?: string;
+  brand?: string;
+  confidence?: "high" | "medium" | "low";
+  raw_text?: string;
+  error?: string;
+}
+
+async function scanMedicationWithAI(imageDataUrl: string): Promise<AIScanResult> {
+  const response = await fetch(
+    `${SUPABASE_URL}/functions/v1/scan-medication`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+        "apikey": SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ image: imageDataUrl }),
+      signal: AbortSignal.timeout(20000), // 20s timeout for AI processing
+    }
+  );
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => "");
+    throw new Error(`AI scan failed: ${response.status} ${errText}`);
+  }
+
+  return response.json();
 }
 
 function CameraScanner({ onResult, onClose }: CameraScannerProps) {
@@ -547,15 +575,68 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
       ctx.drawImage(video, 0, 0);
     }
 
-    // In a production app, you'd send canvas.toDataURL() to an OCR API here.
-    // We use smart pattern matching on simulated output + allow manual fallback.
-    await simulateOCRScan();
+    // Capture frame as JPEG (quality 0.85 — good balance of clarity vs size)
+    const imageDataUrl = canvas.toDataURL("image/jpeg", 0.85);
 
-    // Try to extract from any text the user sees on screen
-    // Show manual input prompt if no result from camera
-    setStage("done");
-    setScanResult({});
-    setShowManual(true);
+    try {
+      const aiResult = await scanMedicationWithAI(imageDataUrl);
+
+      if (aiResult.error || !aiResult.name) {
+        // AI couldn't identify — show manual fallback with helpful message
+        setStage("done");
+        setScanResult({});
+        setErrorMsg(
+          aiResult.confidence === "low"
+            ? "Couldn't read the label clearly. Try better lighting or hold the bottle steady, then scan again."
+            : "Medication not identified. You can type the label text below."
+        );
+        setShowManual(true);
+        return;
+      }
+
+      // AI returned a result — populate scan result
+      const result: Partial<{ name: string; strength: string; unit: string; form: string }> = {
+        name: aiResult.name,
+        strength: aiResult.strength || "",
+        unit: aiResult.unit || "mg",
+        form: aiResult.form || "Tablet",
+      };
+
+      // If AI gave us a brand name but not generic, check local DB for better name
+      if (aiResult.brand && !result.name) {
+        const dbMatch = getMedByName(aiResult.brand);
+        if (dbMatch) {
+          result.name = dbMatch.name;
+          result.strength = result.strength || dbMatch.strength;
+          result.unit = result.unit || dbMatch.unit;
+          result.form = result.form || dbMatch.form;
+        } else {
+          result.name = aiResult.brand;
+        }
+      }
+
+      // Cross-reference with local DB to fill in any missing fields
+      if (result.name) {
+        const dbMatch = getMedByName(result.name);
+        if (dbMatch) {
+          if (!result.strength) result.strength = dbMatch.strength;
+          if (!result.unit) result.unit = dbMatch.unit;
+          if (!result.form) result.form = dbMatch.form;
+        }
+      }
+
+      setStage("done");
+      setScanResult(result);
+      setShowManual(false);
+
+    } catch (err: any) {
+      console.error("Camera scan error:", err);
+      // Network error or timeout — fall back gracefully
+      setStage("done");
+      setScanResult({});
+      setErrorMsg("AI scan unavailable. Type the label text below to add your medication.");
+      setShowManual(true);
+    }
   };
 
   const handleManualParse = () => {
@@ -662,14 +743,21 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
 
         {/* Scanning state */}
         {stage === "scanning" && (
-          <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center gap-3">
-            <motion.div
-              animate={{ scale: [1, 1.05, 1] }}
-              transition={{ duration: 0.8, repeat: Infinity }}
-            >
-              <ScanIcon size={48} />
-            </motion.div>
-            <p className="text-white text-sm font-medium">Analyzing label…</p>
+          <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-4">
+            <div className="relative">
+              <motion.div
+                animate={{ rotate: 360 }}
+                transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
+                className="w-16 h-16 rounded-full border-2 border-white/20 border-t-white"
+              />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <ScanIcon size={22} className="text-white" />
+              </div>
+            </div>
+            <div className="text-center space-y-1">
+              <p className="text-white text-sm font-semibold">Identifying medication…</p>
+              <p className="text-white/50 text-xs">AI is reading the label</p>
+            </div>
           </div>
         )}
 
@@ -702,9 +790,13 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
               exit={{ opacity: 0, height: 0 }}
               className="space-y-2"
             >
-              <p className="text-white/70 text-xs text-center">
-                Type what you see on the label (medication name + dose):
-              </p>
+              {errorMsg ? (
+                <p className="text-amber-300 text-xs text-center font-medium">{errorMsg}</p>
+              ) : (
+                <p className="text-white/70 text-xs text-center">
+                  Type what you see on the label (medication name + dose):
+                </p>
+              )}
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -809,15 +901,32 @@ function MedSearchInput({ value, onChange, onSelect, onOpenCamera }: MedSearchPr
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Track the current search query to cancel stale results
+  const searchVersionRef = useRef(0);
+
   useEffect(() => {
     if (value.trim().length === 0) {
       setResults([]);
       setOpen(false);
       return;
     }
-    const hits = searchMedications(value, 8);
-    setResults(hits);
-    setOpen(hits.length > 0);
+
+    // Show local results immediately (synchronous, no flicker)
+    const localHits = searchMedications(value, 12);
+    setResults(localHits);
+    setOpen(true);
+
+    // Then try RxNorm in background for extended results
+    const version = ++searchVersionRef.current;
+    searchMedicationsWithFallback(value, 12).then(allHits => {
+      // Only apply if this is still the latest query
+      if (version === searchVersionRef.current) {
+        setResults(allHits);
+        setOpen(allHits.length > 0);
+      }
+    }).catch(() => {
+      // RxNorm failed — keep local results
+    });
   }, [value]);
 
   // Close on outside click
