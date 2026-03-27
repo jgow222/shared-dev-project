@@ -6,6 +6,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import type { Medication, DoseLog } from "@shared/schema";
 import { searchMedications, getMedByName, searchMedicationsWithFallback } from "@/lib/medicationDatabase";
 import type { MedEntry } from "@/lib/medicationDatabase";
+import { lookupBarcodeInDrugDB, scanWithAIVision, parseCameraError } from "@/lib/medicationScanner";
+import type { ScanResult as MedScanResult } from "@/lib/medicationScanner";
 
 // ─── Custom SVG Icons (NO Lucide) ─────────────────────────────────────────────
 
@@ -297,433 +299,326 @@ function getRefillBadge(pillCount: number | null): { text: string; color: string
   return null;
 }
 
-// ─── Visual Time Picker ───────────────────────────────────────────────────────
-// Large-target, elderly-friendly custom time picker
+// ─── Time Picker ──────────────────────────────────────────────────────────────
+// Native time input styled for mobile — tap once, OS picker opens instantly
 
 interface TimePickerProps {
   value: string; // "HH:MM" 24h
   onChange: (val: string) => void;
   label?: string;
   index?: number;
+  onRemove?: () => void;
 }
 
-function VisualTimePicker({ value, onChange, label, index }: TimePickerProps) {
+function VisualTimePicker({ value, onChange, label, index, onRemove }: TimePickerProps) {
   const [h, m] = value.split(":").map(Number);
   const isPM = h >= 12;
   const hour12 = h % 12 || 12;
-
-  const setHour12 = (newHour: number) => {
-    const h24 = isPM ? (newHour === 12 ? 12 : newHour + 12) : (newHour === 12 ? 0 : newHour);
-    onChange(`${h24.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`);
-  };
-
-  const setMinutes = (newMin: number) => {
-    onChange(`${h.toString().padStart(2, "0")}:${newMin.toString().padStart(2, "0")}`);
-  };
-
-  const toggleAmPm = () => {
-    const newH = isPM ? (h - 12 < 0 ? 0 : h - 12) : (h + 12 > 23 ? 23 : h + 12);
-    onChange(`${newH.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`);
-  };
-
-  const hours = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-  const minuteSnaps = [0, 15, 30, 45];
+  const formatted = `${hour12}:${m.toString().padStart(2, "0")} ${isPM ? "PM" : "AM"}`;
 
   return (
-    <div className="bg-secondary/50 rounded-2xl p-4 space-y-3" data-testid={`visual-time-picker-${index ?? 0}`}>
-      {label && (
-        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
+    <div className="flex items-center gap-3 bg-secondary/50 rounded-2xl p-3.5" data-testid={`time-picker-${index ?? 0}`}>
+      {/* Time display + native input overlay */}
+      <div className="flex-1 relative">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1">
+          {label || `Dose ${(index ?? 0) + 1}`}
+        </p>
+        <div className="relative flex items-center">
+          <p className="text-2xl font-bold tabular-nums text-foreground">{formatted}</p>
+          {/* Invisible native time input overlaid for tap-to-open */}
+          <input
+            type="time"
+            value={value}
+            onChange={e => onChange(e.target.value)}
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            data-testid={`time-input-${index ?? 0}`}
+          />
+        </div>
+        <p className="text-xs text-muted-foreground mt-0.5">Tap to change time</p>
+      </div>
+      {onRemove && (
+        <motion.button
+          whileTap={{ scale: 0.88 }}
+          onClick={onRemove}
+          className="w-9 h-9 rounded-xl bg-destructive/10 text-destructive flex items-center justify-center flex-shrink-0"
+          data-testid={`remove-time-${index ?? 0}`}
+        >
+          <XIcon size={14} />
+        </motion.button>
       )}
-
-      {/* Large time display */}
-      <div className="flex items-center justify-center gap-3">
-        <div className="text-4xl font-bold tracking-tight tabular-nums text-foreground">
-          {hour12.toString().padStart(2, "0")}:{m.toString().padStart(2, "0")}
-        </div>
-        {/* AM / PM toggle */}
-        <div className="flex flex-col gap-1.5">
-          <motion.button
-            whileTap={{ scale: 0.92 }}
-            onClick={() => { if (isPM) toggleAmPm(); }}
-            className={`w-12 h-9 rounded-xl text-sm font-bold transition-colors ${!isPM ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground border border-border"}`}
-            data-testid={`am-btn-${index ?? 0}`}
-          >
-            AM
-          </motion.button>
-          <motion.button
-            whileTap={{ scale: 0.92 }}
-            onClick={() => { if (!isPM) toggleAmPm(); }}
-            className={`w-12 h-9 rounded-xl text-sm font-bold transition-colors ${isPM ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground border border-border"}`}
-            data-testid={`pm-btn-${index ?? 0}`}
-          >
-            PM
-          </motion.button>
-        </div>
-      </div>
-
-      {/* Hour grid */}
-      <div>
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Hour</p>
-        <div className="grid grid-cols-6 gap-1.5">
-          {hours.map(hr => (
-            <motion.button
-              key={hr}
-              whileTap={{ scale: 0.88 }}
-              onClick={() => setHour12(hr)}
-              className={`h-11 rounded-xl text-sm font-semibold transition-colors ${hour12 === hr ? "bg-primary text-primary-foreground" : "bg-card border border-border text-foreground"}`}
-              data-testid={`hour-${hr}-${index ?? 0}`}
-            >
-              {hr}
-            </motion.button>
-          ))}
-        </div>
-      </div>
-
-      {/* Minute snaps */}
-      <div>
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Minutes</p>
-        <div className="grid grid-cols-4 gap-1.5">
-          {minuteSnaps.map(min => (
-            <motion.button
-              key={min}
-              whileTap={{ scale: 0.88 }}
-              onClick={() => setMinutes(min)}
-              className={`h-12 rounded-xl text-sm font-semibold transition-colors ${m === min ? "bg-primary text-primary-foreground" : "bg-card border border-border text-foreground"}`}
-              data-testid={`min-${min}-${index ?? 0}`}
-            >
-              :{min.toString().padStart(2, "0")}
-            </motion.button>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
 
 // ─── Camera Scanner ────────────────────────────────────────────────────────────
+// Stage 1: ZXing live barcode scanning (free, open-source, browser-native)
+// Stage 2: OpenFDA NDC lookup from barcode → exact drug name/strength/form
+// Stage 3 (fallback): Claude Vision AI for supplements + foreign meds
 
 interface CameraScannerProps {
   onResult: (result: Partial<{ name: string; strength: string; unit: string; form: string }>) => void;
   onClose: () => void;
 }
 
-// Smart pattern matching for medication labels
+// Smart pattern matching for manual text entry fallback
 function parseMedicationLabel(text: string): Partial<{ name: string; strength: string; unit: string; form: string }> {
   const result: Partial<{ name: string; strength: string; unit: string; form: string }> = {};
 
-  // Extract strength + unit patterns like "500mg", "10 mg", "2.5 mcg"
   const strengthMatch = text.match(/(\d+\.?\d*)\s*(mg|mcg|ml|iu|units|g|%)/i);
   if (strengthMatch) {
     result.strength = strengthMatch[1];
     result.unit = strengthMatch[2].toLowerCase().replace("iu", "IU");
   }
 
-  // Detect form keywords
-  const lower = text.toLowerCase();
-  if (lower.includes("tablet") || lower.includes("tab")) result.form = "Tablet";
-  else if (lower.includes("capsule") || lower.includes("cap")) result.form = "Capsule";
-  else if (lower.includes("liquid") || lower.includes("syrup") || lower.includes("solution") || lower.includes("suspension")) result.form = "Liquid";
-  else if (lower.includes("inhaler") || lower.includes("aerosol")) result.form = "Inhaler";
-  else if (lower.includes("patch") || lower.includes("transdermal")) result.form = "Patch";
-  else if (lower.includes("drops") || lower.includes("eye") || lower.includes("ear") || lower.includes("nasal")) result.form = "Drops";
-  else if (lower.includes("injection") || lower.includes("injectable") || lower.includes("syringe")) result.form = "Injection";
+  const formMatch = text.match(/\b(tablet|capsule|liquid|solution|gel cap|softgel|chewable|patch|cream|inhaler|spray|drops|injection|gummy|powder)\b/i);
+  if (formMatch) result.form = formMatch[1].charAt(0).toUpperCase() + formMatch[1].slice(1).toLowerCase();
 
-  // Try to find medication name — look for known drug names in the database
-  const words = text.split(/[\s,\n]+/);
-  for (const word of words) {
-    const trimmed = word.replace(/[^a-zA-Z]/g, "");
-    if (trimmed.length >= 4) {
-      const match = getMedByName(trimmed);
-      if (match) {
-        result.name = match.name;
-        if (!result.strength) result.strength = match.strength;
-        if (!result.unit) result.unit = match.unit;
-        if (!result.form) result.form = match.form;
-        break;
-      }
-    }
-  }
-
-  // Fallback: if no database match, use the longest word that looks like a drug name
-  if (!result.name) {
-    const candidates = words
-      .map(w => w.replace(/[^a-zA-Z]/g, ""))
-      .filter(w => w.length >= 5 && !/^(take|tablet|capsule|oral|daily|dose|each|with|for|the|and|once|twice|times|refills|count|pills|mg|mcg|ml|iu|NDC|exp|lot|mfg|strength|directions|warning|store|keep|light)/i.test(w));
-    if (candidates.length > 0) {
-      result.name = candidates[0].charAt(0).toUpperCase() + candidates[0].slice(1);
-    }
-  }
+  const words = text.split(/\s+/)
+    .filter(w => w.length >= 3 && !/^(take|tablet|capsule|oral|daily|dose|each|with|for|the|and|once|twice|times|refills|count|pills|mg|mcg|ml|iu|NDC|exp|lot|mfg|strength|directions|warning|store|keep|light)/i.test(w));
+  if (words.length > 0) result.name = words[0].charAt(0).toUpperCase() + words[0].slice(1).toLowerCase();
 
   return result;
 }
 
-// ─── AI-powered medication scanner via Supabase Edge Function ─────────────────
-// Sends a base64 JPEG frame to Claude Vision (via Supabase edge function)
-// Returns structured medication data: { name, strength, unit, form, brand, confidence }
-
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://qpmjghocajyvugjxnkdn.supabase.co";
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFwbWpnaG9jYWp5dnVnanhua2RuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1ODM4MDQsImV4cCI6MjA5MDE1OTgwNH0.fzHBvHic5W6BZVUfD-dXEj0x6MaBeM6GyGEUsu8vQt0";
-
-interface AIScanResult {
-  name?: string;
-  strength?: string;
-  unit?: string;
-  form?: string;
-  brand?: string;
-  confidence?: "high" | "medium" | "low";
-  raw_text?: string;
-  error?: string;
-}
-
-async function scanMedicationWithAI(imageDataUrl: string): Promise<AIScanResult> {
-  const response = await fetch(
-    `${SUPABASE_URL}/functions/v1/scan-medication`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
-        "apikey": SUPABASE_ANON_KEY,
-      },
-      body: JSON.stringify({ image: imageDataUrl }),
-      signal: AbortSignal.timeout(35000), // 35s timeout — Claude vision can be slow on first cold start
-    }
-  );
-
-  if (!response.ok) {
-    const errText = await response.text().catch(() => "");
-    throw new Error(`AI scan failed: ${response.status} ${errText}`);
-  }
-
-  return response.json();
-}
+type ScanStage = "starting" | "scanning_barcode" | "looking_up" | "scanning_ai" | "done" | "error";
 
 function CameraScanner({ onResult, onClose }: CameraScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const [stage, setStage] = useState<"starting" | "live" | "scanning" | "done" | "error">("starting");
+  const readerRef = useRef<any>(null);
+  const scanningRef = useRef(false);
+
+  const [stage, setStage] = useState<ScanStage>("starting");
   const [errorMsg, setErrorMsg] = useState("");
-  const [scanResult, setScanResult] = useState<Partial<{ name: string; strength: string; unit: string; form: string }> | null>(null);
+  const [statusMsg, setStatusMsg] = useState("");
+  const [scanResult, setScanResult] = useState<MedScanResult | null>(null);
   const [cameraMode, setCameraMode] = useState<"environment" | "user">("environment");
   const [manualInput, setManualInput] = useState("");
   const [showManual, setShowManual] = useState(false);
+  const [lastBarcode, setLastBarcode] = useState("");
 
-  const startCamera = useCallback(async (facingMode: "environment" | "user" = "environment") => {
-    setStage("starting");
-    setErrorMsg("");
+  const stopScanning = useCallback(() => {
+    scanningRef.current = false;
+    if (readerRef.current) {
+      try { readerRef.current.stopAsyncDecode?.(); } catch {}
+      try { readerRef.current.reset?.(); } catch {}
+      readerRef.current = null;
+    }
+  }, []);
 
-    // Stop any existing stream
+  const stopCamera = useCallback(() => {
+    stopScanning();
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
     }
+  }, [stopScanning]);
+
+  const startBarcodeScan = useCallback(async (video: HTMLVideoElement) => {
+    if (scanningRef.current) return;
 
     try {
-      // Check if camera API is available at all
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw Object.assign(new Error("Camera API not available"), { name: "NotSupportedError" });
-      }
+      // Dynamically import ZXing so it doesn't block initial render
+      const { BrowserMultiFormatReader, NotFoundException } = await import("@zxing/browser");
+      const reader = new BrowserMultiFormatReader();
+      readerRef.current = reader;
+      scanningRef.current = true;
 
-      const constraints: MediaStreamConstraints = {
-        video: {
-          facingMode: { ideal: facingMode },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
-      };
+      setStage("scanning_barcode");
+      setStatusMsg("Point at the barcode on the bottle");
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      streamRef.current = stream;
+      // Continuously decode from the video stream
+      reader.decodeFromVideoElement(video, (result, error) => {
+        if (!scanningRef.current) return;
 
-      if (videoRef.current) {
-        const video = videoRef.current;
-        video.srcObject = stream;
+        if (result) {
+          const barcode = result.getText();
+          if (!barcode || barcode === lastBarcode) return;
 
-        // Wait for video to be ready before marking as live
-        await new Promise<void>((resolve, reject) => {
-          const timeout = setTimeout(() => reject(new Error("Video ready timeout")), 10000);
-          video.onloadedmetadata = () => {
-            clearTimeout(timeout);
-            resolve();
-          };
-          video.onerror = () => {
-            clearTimeout(timeout);
-            reject(new Error("Video element error"));
-          };
-        });
+          // Validate: only accept numeric barcodes (UPC/EAN for drugs)
+          // Skip QR codes that aren't medication barcodes
+          const format = result.getBarcodeFormat();
+          const isNumericBarcode = /^\d{8,14}$/.test(barcode);
+          if (!isNumericBarcode) return;
 
-        try {
-          await video.play();
-        } catch (playErr: any) {
-          // Some browsers throw AbortError when play() is interrupted — ignore it
-          if (playErr?.name !== "AbortError") throw playErr;
+          setLastBarcode(barcode);
+          stopScanning();
+          handleBarcodeFound(barcode);
         }
+      });
 
-        setStage("live");
-      }
-    } catch (err: any) {
-      console.error("Camera error:", err.name, err.message);
-      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-        setErrorMsg("Camera permission denied. Allow camera access in your browser settings, then tap Try Again.");
-      } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
-        setErrorMsg("No camera found on this device.");
-      } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
-        setErrorMsg("Camera is in use by another app. Close other camera apps and try again.");
-      } else if (err.name === "NotSupportedError" || err.name === "OverconstrainedError") {
-        setErrorMsg("Camera not supported on this browser. Try Chrome or Safari.");
-      } else {
-        setErrorMsg(`Camera error: ${err.message || "Unknown error"}. Try the Type Label button below.`);
-      }
-      setStage("error");
+    } catch (err) {
+      console.error("ZXing init error:", err);
+      // ZXing failed — fall back to AI vision directly
+      setStage("scanning_ai");
+      setStatusMsg("Using AI to identify label…");
+    }
+  }, [lastBarcode, stopScanning]);
+
+  const handleBarcodeFound = useCallback(async (barcode: string) => {
+    setStage("looking_up");
+    setStatusMsg(`Found barcode: ${barcode} — looking up drug…`);
+
+    const result = await lookupBarcodeInDrugDB(barcode);
+
+    if (result) {
+      setScanResult(result);
+      setStage("done");
+      setStatusMsg("");
+    } else {
+      // Barcode not in drug database — try AI vision as fallback
+      setStatusMsg("Not found in database. Trying AI scan…");
+      await runAIScan();
     }
   }, []);
 
-  // Auto-start camera on mount
-  useEffect(() => {
-    startCamera("environment");
-    return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(t => t.stop());
-      }
-    };
-  }, [startCamera]);
-
-  const captureAndScan = async () => {
-    if (!videoRef.current || !canvasRef.current) return;
-
+  const runAIScan = useCallback(async () => {
     const video = videoRef.current;
-
-    // Make sure video actually has frames — readyState 4 = HAVE_ENOUGH_DATA
-    if (video.readyState < 2) {
-      setErrorMsg("Camera isn't ready yet. Wait a moment and try again.");
+    const canvas = canvasRef.current;
+    if (!video || !canvas) {
+      setStage("done");
+      setErrorMsg("Could not capture image. Use Type Label below.");
+      setShowManual(true);
       return;
     }
 
-    setStage("scanning");
-    setErrorMsg("");
+    if (video.readyState < 2) {
+      setStage("done");
+      setErrorMsg("Camera not ready. Try again.");
+      setShowManual(true);
+      return;
+    }
 
-    const canvas = canvasRef.current;
+    setStage("scanning_ai");
+    setStatusMsg("AI is reading the label…");
+
     const w = video.videoWidth || 1280;
     const h = video.videoHeight || 720;
     canvas.width = w;
     canvas.height = h;
     const ctx = canvas.getContext("2d");
     if (!ctx) {
-      setStage("error");
-      setErrorMsg("Canvas not available. Try a different browser.");
+      setStage("done");
+      setErrorMsg("Canvas not available.");
+      setShowManual(true);
       return;
     }
     ctx.drawImage(video, 0, 0, w, h);
-
-    // Capture at full quality JPEG for best OCR results
     const imageDataUrl = canvas.toDataURL("image/jpeg", 0.95);
 
-    // Sanity check — make sure we have actual data
     if (imageDataUrl.length < 5000) {
       setStage("done");
-      setScanResult({});
-      setErrorMsg("Could not capture image from camera. Try again or use Type Label.");
+      setErrorMsg("Could not capture image from camera.");
       setShowManual(true);
       return;
     }
 
-    try {
-      const aiResult = await scanMedicationWithAI(imageDataUrl);
+    const aiResult = await scanWithAIVision(imageDataUrl);
 
-      if (aiResult.error || !aiResult.name) {
-        // AI couldn't identify — show manual fallback with helpful message
-        setStage("done");
-        setScanResult({});
-        setErrorMsg(
-          aiResult.confidence === "low"
-            ? "Label wasn't clear enough. Try better lighting, move closer, and scan again."
-            : "Medication not identified. Type the label text below."
-        );
-        setShowManual(true);
-        return;
-      }
-
-      // AI returned a result — populate scan result
-      const result: Partial<{ name: string; strength: string; unit: string; form: string }> = {
-        name: aiResult.name,
-        strength: aiResult.strength || "",
-        unit: aiResult.unit || "mg",
-        form: aiResult.form || "Tablet",
-      };
-
-      // If AI gave us a brand name but not generic, check local DB for better name
-      if (aiResult.brand && !result.name) {
-        const dbMatch = getMedByName(aiResult.brand);
-        if (dbMatch) {
-          result.name = dbMatch.name;
-          result.strength = result.strength || dbMatch.strength;
-          result.unit = result.unit || dbMatch.unit;
-          result.form = result.form || dbMatch.form;
-        } else {
-          result.name = aiResult.brand;
-        }
-      }
-
-      // Cross-reference with local DB to fill in any missing fields
-      if (result.name) {
-        const dbMatch = getMedByName(result.name);
-        if (dbMatch) {
-          if (!result.strength) result.strength = dbMatch.strength;
-          if (!result.unit) result.unit = dbMatch.unit;
-          if (!result.form) result.form = dbMatch.form;
-        }
-      }
-
+    if (aiResult) {
+      setScanResult(aiResult);
       setStage("done");
-      setScanResult(result);
-      setShowManual(false);
-
-    } catch (err: any) {
-      console.error("Camera scan error:", err?.name, err?.message);
+      setStatusMsg("");
+    } else {
       setStage("done");
-      setScanResult({});
-      // Give a specific error based on what went wrong
-      if (err?.name === "TimeoutError" || err?.message?.includes("timeout") || err?.message?.includes("Timeout")) {
-        setErrorMsg("Scan timed out — AI is warming up. Try again in a few seconds.");
-      } else if (err?.message?.includes("NetworkError") || err?.message?.includes("Failed to fetch")) {
-        setErrorMsg("No internet connection. Check your connection and try again.");
-      } else {
-        setErrorMsg("Scan failed. Make sure the label is well-lit and try again, or type it below.");
-      }
+      setErrorMsg("Couldn't identify this medication. Try typing the label below.");
       setShowManual(true);
     }
-  };
+  }, []);
+
+  const startCamera = useCallback(async (facingMode: "environment" | "user" = "environment") => {
+    stopCamera();
+    setStage("starting");
+    setErrorMsg("");
+    setScanResult(null);
+    setShowManual(false);
+    setLastBarcode("");
+
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw Object.assign(new Error("Camera API not available"), { name: "NotSupportedError" });
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: facingMode },
+          width: { ideal: 1920, min: 640 },
+          height: { ideal: 1080, min: 480 },
+        },
+        audio: false,
+      });
+
+      streamRef.current = stream;
+
+      if (videoRef.current) {
+        const video = videoRef.current;
+        video.srcObject = stream;
+
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error("Video ready timeout")), 10000);
+          video.onloadedmetadata = () => { clearTimeout(timeout); resolve(); };
+          video.onerror = () => { clearTimeout(timeout); reject(new Error("Video element error")); };
+        });
+
+        try { await video.play(); } catch (e: any) {
+          if (e?.name !== "AbortError") throw e;
+        }
+
+        // Start barcode scanning immediately
+        startBarcodeScan(video);
+      }
+    } catch (err) {
+      const scanError = parseCameraError(err);
+      setErrorMsg(scanError.message);
+      setStage("error");
+    }
+  }, [stopCamera, startBarcodeScan]);
+
+  useEffect(() => {
+    startCamera("environment");
+    return () => stopCamera();
+  }, []);
 
   const handleManualParse = () => {
     if (!manualInput.trim()) return;
     const parsed = parseMedicationLabel(manualInput);
-    setScanResult(parsed);
-    setShowManual(false);
-    setStage("done");
-  };
-
-  const handleFlipCamera = () => {
-    const newMode = cameraMode === "environment" ? "user" : "environment";
-    setCameraMode(newMode);
-    startCamera(newMode);
+    if (parsed.name) {
+      onResult(parsed);
+    } else {
+      setErrorMsg("Couldn't parse that. Make sure to include the medication name.");
+    }
   };
 
   const confirmResult = () => {
-    if (scanResult) onResult(scanResult);
+    if (!scanResult) return;
+    onResult({
+      name: scanResult.name,
+      strength: scanResult.strength,
+      unit: scanResult.unit,
+      form: scanResult.form,
+    });
+  };
+
+  const stageLabel: Record<ScanStage, string> = {
+    starting: "Starting camera…",
+    scanning_barcode: "Scanning barcode…",
+    looking_up: "Looking up drug…",
+    scanning_ai: "AI reading label…",
+    done: "",
+    error: "",
   };
 
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.95 }}
+      initial={{ opacity: 0, scale: 0.97 }}
       animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
+      exit={{ opacity: 0, scale: 0.97 }}
       className="fixed inset-0 z-50 bg-black flex flex-col"
       data-testid="camera-scanner"
     >
       {/* Top bar */}
-      <div className="flex items-center justify-between px-4 pt-safe pt-4 pb-3">
+      <div className="flex items-center justify-between px-4 pt-12 pb-3">
         <motion.button
           whileTap={{ scale: 0.88 }}
           onClick={onClose}
@@ -732,19 +627,20 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
         >
           <XIcon size={18} />
         </motion.button>
-        <div className="text-white text-sm font-semibold">Scan Medication Label</div>
+        <div className="text-white text-sm font-semibold">Scan Medication</div>
         <motion.button
           whileTap={{ scale: 0.88 }}
-          onClick={handleFlipCamera}
+          onClick={() => {
+            const next = cameraMode === "environment" ? "user" : "environment";
+            setCameraMode(next);
+            startCamera(next);
+          }}
           className="w-10 h-10 rounded-full bg-white/15 flex items-center justify-center text-white"
           data-testid="flip-camera"
         >
-          {/* Flip icon */}
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round">
-            <path d="M1 4l3-3 3 3" />
-            <path d="M4 1v8a5 5 0 0 0 10 0" />
-            <path d="M17 14l-3 3-3-3" />
-            <path d="M14 17V9A5 5 0 0 0 4 9" />
+            <path d="M1 4l3-3 3 3" /><path d="M4 1v8a5 5 0 0 0 10 0" />
+            <path d="M17 14l-3 3-3-3" /><path d="M14 17V9A5 5 0 0 0 4 9" />
           </svg>
         </motion.button>
       </div>
@@ -761,11 +657,11 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
         />
         <canvas ref={canvasRef} className="hidden" />
 
-        {/* Scanner overlay */}
-        {stage === "live" && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="relative w-72 h-44">
-              {/* Corner guides */}
+        {/* Scanning overlay — barcode frame */}
+        {(stage === "scanning_barcode") && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+            {/* Barcode scan box */}
+            <div className="relative w-72 h-36 mb-4">
               {[
                 "top-0 left-0 border-t-4 border-l-4 rounded-tl-lg",
                 "top-0 right-0 border-t-4 border-r-4 rounded-tr-lg",
@@ -774,51 +670,35 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
               ].map((cls, i) => (
                 <div key={i} className={`absolute w-8 h-8 border-white/90 ${cls}`} />
               ))}
-              {/* Scan line animation */}
               <motion.div
-                className="absolute left-0 right-0 h-0.5 bg-primary/80"
-                animate={{ top: ["10%", "90%", "10%"] }}
+                className="absolute left-2 right-2 h-0.5 bg-primary/80"
+                animate={{ top: ["8%", "88%", "8%"] }}
                 transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
               />
             </div>
-          </div>
-        )}
-
-        {/* Starting state */}
-        {stage === "starting" && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-            <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center">
-              <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                className="w-8 h-8 border-2 border-white/30 border-t-white rounded-full"
-              />
+            <div className="bg-black/50 rounded-2xl px-5 py-2.5 text-center">
+              <p className="text-white text-sm font-semibold">Point at barcode</p>
+              <p className="text-white/60 text-xs mt-0.5">Scanning automatically…</p>
             </div>
-            <p className="text-white/80 text-sm">Starting camera…</p>
           </div>
         )}
 
-        {/* Scanning state */}
-        {stage === "scanning" && (
+        {/* Loading/processing overlay */}
+        {(stage === "starting" || stage === "looking_up" || stage === "scanning_ai") && (
           <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-4">
-            <div className="relative">
-              <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
-                className="w-16 h-16 rounded-full border-2 border-white/20 border-t-white"
-              />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <ScanIcon size={22} className="text-white" />
-              </div>
-            </div>
-            <div className="text-center space-y-1">
-              <p className="text-white text-sm font-semibold">Identifying medication…</p>
-              <p className="text-white/50 text-xs">AI is reading the label</p>
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+              className="w-14 h-14 rounded-full border-2 border-white/20 border-t-white"
+            />
+            <div className="text-center">
+              <p className="text-white text-sm font-semibold">{stageLabel[stage]}</p>
+              {statusMsg && <p className="text-white/60 text-xs mt-1 px-6 text-center">{statusMsg}</p>}
             </div>
           </div>
         )}
 
-        {/* Error state */}
+        {/* Error overlay */}
         {stage === "error" && (
           <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-4 px-6">
             <div className="w-16 h-16 rounded-full bg-destructive/20 flex items-center justify-center">
@@ -836,9 +716,41 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
         )}
       </div>
 
-      {/* Bottom controls */}
-      <div className="px-5 pb-safe pb-8 pt-4 space-y-3">
-        {/* Manual input (shown after scan or on demand) */}
+      {/* Bottom panel */}
+      <div className="px-5 pb-10 pt-4 space-y-3 bg-black">
+        {/* Scan result */}
+        <AnimatePresence>
+          {stage === "done" && scanResult && !showManual && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white/10 rounded-2xl p-4 space-y-1.5"
+            >
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${scanResult.confidence === "high" ? "bg-green-400" : "bg-amber-400"}`} />
+                <p className="text-white/60 text-xs font-bold uppercase tracking-widest">
+                  {scanResult.source === "barcode" ? "Barcode matched" : "AI identified"} · {scanResult.confidence} confidence
+                </p>
+              </div>
+              <p className="text-white text-lg font-bold">{scanResult.name}</p>
+              {scanResult.brand && scanResult.brand.toLowerCase() !== scanResult.name.toLowerCase() && (
+                <p className="text-white/60 text-sm">{scanResult.brand}</p>
+              )}
+              {(scanResult.strength || scanResult.form) && (
+                <p className="text-white/70 text-sm">
+                  {[scanResult.strength && `${scanResult.strength} ${scanResult.unit}`, scanResult.form].filter(Boolean).join(" · ")}
+                </p>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Error message */}
+        {stage === "done" && errorMsg && (
+          <p className="text-amber-300 text-xs text-center">{errorMsg}</p>
+        )}
+
+        {/* Manual input */}
         <AnimatePresence>
           {showManual && (
             <motion.div
@@ -847,20 +759,13 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
               exit={{ opacity: 0, height: 0 }}
               className="space-y-2"
             >
-              {errorMsg ? (
-                <p className="text-amber-300 text-xs text-center font-medium">{errorMsg}</p>
-              ) : (
-                <p className="text-white/70 text-xs text-center">
-                  Type what you see on the label (medication name + dose):
-                </p>
-              )}
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={manualInput}
                   onChange={e => setManualInput(e.target.value)}
                   placeholder='e.g. "Metformin 500mg tablet"'
-                  className="flex-1 h-11 px-4 rounded-xl bg-white/10 text-white text-sm placeholder-white/40 border border-white/20 focus:outline-none focus:border-white/60"
+                  className="flex-1 h-12 px-4 rounded-xl bg-white/10 text-white text-sm placeholder-white/40 border border-white/20 focus:outline-none focus:border-white/60"
                   data-testid="manual-label-input"
                   autoFocus
                   onKeyDown={e => e.key === "Enter" && handleManualParse()}
@@ -868,7 +773,7 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
                 <motion.button
                   whileTap={{ scale: 0.88 }}
                   onClick={handleManualParse}
-                  className="h-11 px-4 bg-primary text-primary-foreground rounded-xl text-sm font-semibold"
+                  className="h-12 px-4 bg-primary text-primary-foreground rounded-xl text-sm font-semibold"
                 >
                   <CheckIcon size={16} />
                 </motion.button>
@@ -877,25 +782,9 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
           )}
         </AnimatePresence>
 
-        {/* Scan result preview */}
-        <AnimatePresence>
-          {scanResult && !showManual && Object.keys(scanResult).some(k => (scanResult as any)[k]) && (
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-white/10 rounded-2xl p-3.5 space-y-1"
-            >
-              <p className="text-white/60 text-xs uppercase tracking-widest font-bold">Detected</p>
-              {scanResult.name && <p className="text-white font-semibold">{scanResult.name}</p>}
-              {(scanResult.strength || scanResult.unit) && (
-                <p className="text-white/70 text-sm">{scanResult.strength} {scanResult.unit} · {scanResult.form}</p>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
+        {/* Action buttons */}
         <div className="flex gap-3">
-          {/* Manual type button */}
+          {/* Type label button — always visible */}
           <motion.button
             whileTap={{ scale: 0.92 }}
             onClick={() => setShowManual(v => !v)}
@@ -905,39 +794,33 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
             Type Label
           </motion.button>
 
-          {/* Main capture button */}
-          {(stage === "live" || stage === "scanning") && (
+          {/* AI Scan button — available in barcode mode or after failed barcode */}
+          {(stage === "scanning_barcode" || (stage === "done" && !scanResult)) && (
             <motion.button
-              whileTap={{ scale: 0.9 }}
-              onClick={captureAndScan}
-              disabled={stage === "scanning"}
-              className="flex-1 h-14 rounded-2xl bg-primary text-primary-foreground text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
-              data-testid="capture-btn"
+              whileTap={{ scale: 0.92 }}
+              onClick={runAIScan}
+              className="flex-1 h-14 rounded-2xl bg-primary/80 text-white text-sm font-semibold border border-primary/40 flex items-center justify-center gap-2"
+              data-testid="ai-scan-btn"
             >
-              <ScanIcon size={18} />
-              {stage === "scanning" ? "Scanning…" : "Scan"}
+              <ScanIcon size={16} />
+              AI Scan
             </motion.button>
           )}
 
-          {/* Scan Again button — shown when done (whether success or fail) */}
+          {/* Scan Again */}
           {stage === "done" && (
             <motion.button
               whileTap={{ scale: 0.92 }}
-              onClick={() => {
-                setScanResult(null);
-                setShowManual(false);
-                setErrorMsg("");
-                startCamera(cameraMode);
-              }}
-              className="flex-1 h-14 rounded-2xl bg-white/15 text-white text-sm font-semibold border border-white/25"
+              onClick={() => startCamera(cameraMode)}
+              className="flex-1 h-14 rounded-2xl bg-white/10 text-white text-sm font-semibold border border-white/20"
               data-testid="scan-again-btn"
             >
               Scan Again
             </motion.button>
           )}
 
-          {/* Confirm result button */}
-          {stage === "done" && scanResult && Object.values(scanResult).some(Boolean) && !showManual && (
+          {/* Confirm */}
+          {stage === "done" && scanResult && !showManual && (
             <motion.button
               whileTap={{ scale: 0.92 }}
               onClick={confirmResult}
@@ -950,15 +833,10 @@ function CameraScanner({ onResult, onClose }: CameraScannerProps) {
           )}
         </div>
 
-        {/* Hint text */}
-        {stage === "live" && (
-          <p className="text-white/50 text-xs text-center">
-            Point at the medication label and tap Scan
-          </p>
-        )}
-        {stage === "scanning" && (
-          <p className="text-white/50 text-xs text-center">
-            Hold steady… reading the label
+        {/* Hint */}
+        {stage === "scanning_barcode" && (
+          <p className="text-white/40 text-xs text-center">
+            No barcode? Tap <strong className="text-white/60">AI Scan</strong> to read the label
           </p>
         )}
       </div>
@@ -1425,13 +1303,31 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
             {/* Dose strength */}
             <div>
               <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Dose Amount</label>
+              {/* Quick-tap common doses */}
+              <div className="mt-2 flex flex-wrap gap-2 mb-2">
+                {["5","10","25","50","100","200","250","500","1000"].map(preset => (
+                  <motion.button
+                    key={preset}
+                    whileTap={{ scale: 0.88 }}
+                    onClick={() => setDoseStrength(preset)}
+                    className={`h-9 px-3.5 rounded-xl text-sm font-bold transition-colors ${
+                      doseStrength === preset
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-card border border-border text-muted-foreground"
+                    }`}
+                    data-testid={`dose-preset-${preset}`}
+                  >
+                    {preset}
+                  </motion.button>
+                ))}
+              </div>
               <input
                 type="text"
                 inputMode="decimal"
                 value={doseStrength}
                 onChange={e => setDoseStrength(e.target.value)}
-                placeholder="e.g., 500"
-                className={`mt-2 ${inputClass}`}
+                placeholder="Or type any amount (e.g. 325, 2.5, 1000)"
+                className={inputClass}
                 data-testid="med-dose-input"
               />
             </div>
@@ -1481,7 +1377,7 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
           </motion.div>
         )}
 
-        {/* ── STEP 2: Schedule ─────────────────────────────────────────────────── */}
+        {/* ── STEP 2: Schedule ────────────────────────────────────────────────── */}
         {(step === 2 || editMode) && !showCamera && (
           <motion.div
             key="step2"
@@ -1499,49 +1395,88 @@ function MedForm({ med, onClose }: { med?: Medication; onClose: () => void }) {
                     key={opt.label}
                     whileTap={{ scale: 0.94 }}
                     onClick={() => handleFrequencySelect(opt)}
-                    className={`h-16 px-4 rounded-2xl transition-colors border flex items-center gap-3 ${
+                    className={`h-14 px-4 rounded-2xl transition-colors border flex items-center gap-3 ${
                       frequency === opt.label
                         ? "bg-primary text-primary-foreground border-primary"
                         : "bg-card border-border text-foreground"
                     }`}
                     data-testid={`freq-${opt.label.replace(/\s+/g, "-")}`}
                   >
-                    <span className={`text-sm font-black w-9 text-center flex-shrink-0 ${frequency === opt.label ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                    <span className={`text-sm font-black w-8 text-center flex-shrink-0 ${frequency === opt.label ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
                       {opt.emoji}
                     </span>
                     <span className="text-sm font-semibold text-left leading-snug">{opt.label}</span>
                   </motion.button>
                 ))}
               </div>
+              {/* Custom frequency text field */}
+              <div className="mt-2">
+                <input
+                  type="text"
+                  placeholder="Custom schedule (e.g. Every Monday, Every 8 hours…)"
+                  value={FREQUENCY_OPTIONS.some(o => o.label === frequency) ? "" : frequency}
+                  onChange={e => setFrequency(e.target.value || frequency)}
+                  onFocus={e => { if (FREQUENCY_OPTIONS.some(o => o.label === frequency)) e.target.value = ""; }}
+                  className="w-full h-12 px-4 rounded-2xl border border-dashed border-border bg-card text-foreground text-sm placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  data-testid="custom-frequency-input"
+                />
+              </div>
             </div>
 
-            {/* Visual time pickers */}
-            {times.length > 0 && (
-              <div className="space-y-3">
+            {/* Dose times — easy tap-to-set pickers */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
                 <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
                   <ClockIcon size={12} /> Dose times
                 </label>
-                {times.map((t, i) => (
-                  <VisualTimePicker
-                    key={i}
-                    value={t}
-                    onChange={newTime => {
-                      const updated = [...times];
-                      updated[i] = newTime;
-                      setTimes(updated);
+                {/* Add time button */}
+                {times.length < 8 && (
+                  <motion.button
+                    whileTap={{ scale: 0.92 }}
+                    onClick={() => {
+                      const defaults = ["08:00", "12:00", "18:00", "21:00", "06:00", "10:00", "14:00", "22:00"];
+                      const next = defaults.find(t => !times.includes(t)) || "08:00";
+                      setTimes([...times, next]);
                     }}
-                    label={times.length > 1 ? `Dose ${i + 1} — ${formatTime(t)}` : `Time — ${formatTime(t)}`}
-                    index={i}
-                  />
-                ))}
+                    className="flex items-center gap-1.5 text-xs font-bold text-primary bg-primary/10 px-3 py-1.5 rounded-full"
+                    data-testid="add-time-btn"
+                  >
+                    <PlusIcon size={12} /> Add time
+                  </motion.button>
+                )}
               </div>
-            )}
 
-            {times.length === 0 && (
-              <div className="bg-secondary/50 rounded-2xl p-4 text-center">
-                <p className="text-sm text-muted-foreground">Take as needed — no scheduled times</p>
-              </div>
-            )}
+              {times.length > 0 ? (
+                <div className="space-y-2">
+                  {times.map((t, i) => (
+                    <VisualTimePicker
+                      key={i}
+                      value={t}
+                      onChange={newTime => {
+                        const updated = [...times];
+                        updated[i] = newTime;
+                        setTimes(updated);
+                      }}
+                      label={`Dose ${i + 1}`}
+                      index={i}
+                      onRemove={times.length > 1 ? () => setTimes(times.filter((_, idx) => idx !== i)) : undefined}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="bg-secondary/50 rounded-2xl p-4 text-center">
+                  <p className="text-sm text-muted-foreground">Take as needed — no scheduled times</p>
+                  <motion.button
+                    whileTap={{ scale: 0.92 }}
+                    onClick={() => setTimes(["08:00"])}
+                    className="mt-2 text-xs text-primary font-bold"
+                    data-testid="add-first-time-btn"
+                  >
+                    + Add a time
+                  </motion.button>
+                </div>
+              )}
+            </div>
           </motion.div>
         )}
 
