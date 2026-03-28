@@ -8,6 +8,7 @@ import type { Medication, DoseLog } from "@shared/schema";
 import { searchMedications, getMedByName, searchMedicationsWithFallback } from "@/lib/medicationDatabase";
 import type { MedEntry } from "@/lib/medicationDatabase";
 // medicationScanner.ts kept for potential future barcode integration
+import { RefillFinderSheet } from "@/components/RefillFinderSheet";
 
 // ─── Custom SVG Icons (NO Lucide) ─────────────────────────────────────────────
 
@@ -2040,7 +2041,7 @@ function getMedInfo(name: string) {
   return null;
 }
 
-function MedDetail({ med, onClose }: { med: Medication; onClose: () => void }) {
+function MedDetail({ med, onClose, onFindRefill }: { med: Medication; onClose: () => void; onFindRefill?: (med: Medication) => void }) {
   const [activeTab, setActiveTab] = useState<"overview" | "history" | "info">("overview");
   const [showInteractions, setShowInteractions] = useState(false);
   const times: string[] = JSON.parse(med.schedule_times);
@@ -2192,11 +2193,10 @@ function MedDetail({ med, onClose }: { med: Medication; onClose: () => void }) {
                       {med.pill_count} remaining
                       {med.pill_count <= 14 && " — running low"}
                     </p>
-                    {med.pill_count <= 14 && (
-                      <a
-                        href={`https://www.goodrx.com/${encodeURIComponent(med.name.toLowerCase().replace(/\s+/g, "-"))}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                    {med.pill_count <= 14 && onFindRefill && (
+                      <motion.button
+                        whileTap={{ scale: 0.92 }}
+                        onClick={() => onFindRefill(med)}
                         className="flex-shrink-0 h-8 px-3 rounded-xl bg-primary text-primary-foreground text-xs font-bold flex items-center gap-1.5"
                       >
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round">
@@ -2204,7 +2204,7 @@ function MedDetail({ med, onClose }: { med: Medication; onClose: () => void }) {
                           <path d="M6 1C3.79 1 2 2.79 2 5c0 2.63 4 7 4 7s4-4.37 4-7c0-2.21-1.79-4-4-4z" />
                         </svg>
                         Find Refill
-                      </a>
+                      </motion.button>
                     )}
                   </div>
                 </div>
@@ -2395,6 +2395,7 @@ export default function MedsPage() {
   const [selectedMed, setSelectedMed] = useState<Medication | null>(null);
   // Delete confirmation lives here so the sheet renders outside MedCard's overflow:hidden
   const [medToDelete, setMedToDelete] = useState<Medication | null>(null);
+  const [refillMed, setRefillMed] = useState<Medication | null>(null);
 
   const deleteMedMutation = useMutation({
     mutationFn: async (id: number) => { await api.deleteMedication(id); },
@@ -2432,7 +2433,7 @@ export default function MedsPage() {
   if (view === "detail" && selectedMed) {
     return (
       <div className="px-4 py-6">
-        <MedDetail med={selectedMed} onClose={() => { setView("list"); setSelectedMed(null); }} />
+        <MedDetail med={selectedMed} onClose={() => { setView("list"); setSelectedMed(null); }} onFindRefill={setRefillMed} />
       </div>
     );
   }
@@ -2551,6 +2552,13 @@ export default function MedsPage() {
           )}
         </>
       )}
+
+      {/* ── Refill finder sheet ── */}
+      <AnimatePresence>
+        {refillMed && (
+          <RefillFinderSheet med={refillMed} onClose={() => setRefillMed(null)} />
+        )}
+      </AnimatePresence>
 
       {/* ── Delete confirmation sheet — rendered at page level, above nav ── */}
       <AnimatePresence>
